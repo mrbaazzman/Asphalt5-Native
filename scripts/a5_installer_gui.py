@@ -203,6 +203,8 @@ DISPLAY
   A5_SCREEN=854x480    override the logical UI layout (advanced)
   A5_TEXSCALE=auto     texture density (default follows render scale)
   A5_TEXSCALE=off      keep original texture resolution
+  A5_ASPECT=fit        preserve 16:9 with black bars (default)
+  A5_ASPECT=stretch    fill the whole window
 
 CONTROLS
   Mouse / touch : menus, HUD, pedals, nitro and pause
@@ -210,6 +212,7 @@ CONTROLS
   Space : nitro
   C : camera
   Esc : pause / back
+  Mouse click / Esc : skip intro or reward video (after 0.5 s)
 
 FILES
   Asphalt5.exe            native game (engine data embedded; no .so)

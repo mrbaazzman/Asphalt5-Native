@@ -135,6 +135,9 @@ builder never downloads, bundles, or redistributes game data.
 The keyboard path goes through the engine's own key system
 (`Game::InputKeyBoard`), so in-game remapping and menus work.
 
+**Click the mouse or press Esc to skip the intro/reward video.** Clicks in the
+first 500 ms are ignored so focusing the game window does not skip it.
+
 ## Resolution
 
 The default render size is **1920×1080 physical pixels**. The process is
@@ -158,6 +161,8 @@ art detail. Set `A5_TEXSCALE=off` to keep original texture resolution.
 | `A5_WINDOW=WxH` | render/window size (default 1920×1080 or desktop) |
 | `A5_WINDOWED=1` | force a bordered window instead of borderless |
 | `A5_BORDERLESS=1` | force borderless even below desktop size |
+| `A5_ASPECT=fit` | preserve 16:9 with letterbox/pillarbox (default) |
+| `A5_ASPECT=stretch` | fill the whole window (legacy behavior) |
 | `A5_SCREEN=WxH` | override the logical layout resolution (advanced/legacy) |
 | `A5_TEXSCALE=auto` | upscale level-0 textures to render density (default) |
 | `A5_TEXSCALE=off` | keep original texture resolution |

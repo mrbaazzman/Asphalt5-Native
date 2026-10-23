@@ -178,6 +178,8 @@ Add `0x16814c` to `list.txt` and run the regeneration pipeline.
 | `A5_WINDOW=WxH` | Real window/render size; default 1920×1080 or desktop. |
 | `A5_SCREEN=WxH` | Logical UI/layout size; default 854×480. |
 | `A5_WINDOWED=1` | Force a bordered window (default is borderless at display size). |
+| `A5_ASPECT=fit` | Preserve 16:9 with letterbox/pillarbox (default). |
+| `A5_ASPECT=stretch` | Fill the window (legacy behavior). |
 | `A5_TEXSCALE=auto` | Resample level-0 textures to render density (default). |
 | `A5_TEXSCALE=off` | Keep original texture resolution. |
 | `A5_FPS_HUD` | (if enabled in the host) live FPS/cap readout. |

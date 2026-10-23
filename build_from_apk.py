@@ -203,6 +203,8 @@ DISPLAY
   A5_WINDOWED=1        force a normal bordered window
   A5_TEXSCALE=auto     texture density (default follows render scale)
   A5_TEXSCALE=off      keep original texture resolution
+  A5_ASPECT=fit        preserve 16:9 with black bars (default)
+  A5_ASPECT=stretch    fill the whole window
 
 FILES
   Asphalt5.exe                    native game (engine data embedded; no .so)
@@ -227,6 +229,7 @@ NOTES
   - The game engine image and data remain the property of their owners.
     Do not redistribute this folder; build it from your own legally owned
     APK and data.
+  - Click the mouse or press Esc to skip the intro/reward video (after 0.5 s).
   - If the game asks for data and the official server is gone, use your own
     installed data or data packs.
 

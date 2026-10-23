@@ -65,6 +65,7 @@ CONTROLS
   Space: nitro
   C: camera
   Esc: pause / back
+  Mouse click / Esc: skip intro or reward video (after 0.5 s)
 
 REQUIREMENTS
   Windows 10/11 x64, an internet connection for the first download, and your

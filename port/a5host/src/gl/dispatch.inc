@@ -142,12 +142,12 @@ static uint32_t a5gl_call_inner(const char* name, const uint32_t* raw, uint32_t 
         // scissor rectangles to the real window; leave already-window-sized
         // rectangles alone (raw movie/installer paths use those).
         if (gl_logical_w > 0 && gl_logical_h > 0 &&
-            win_w > 0 && win_h > 0 &&
+            gl_view_w > 0 && gl_view_h > 0 &&
             !(w == win_w && h == win_h)) {
-            int x0 = (int)((long long)x * win_w / gl_logical_w);
-            int x1 = (int)((long long)(x + w) * win_w / gl_logical_w);
-            int y0 = (int)((long long)y * win_h / gl_logical_h);
-            int y1 = (int)((long long)(y + h) * win_h / gl_logical_h);
+            int x0 = gl_view_x + (int)((long long)x * gl_view_w / gl_logical_w);
+            int x1 = gl_view_x + (int)((long long)(x + w) * gl_view_w / gl_logical_w);
+            int y0 = gl_view_y + (int)((long long)y * gl_view_h / gl_logical_h);
+            int y1 = gl_view_y + (int)((long long)(y + h) * gl_view_h / gl_logical_h);
             rx = x0; ry = y0; rw = x1 - x0; rh = y1 - y0;
         }
         if (getenv("A5_GL_VIEWPORT_DEBUG"))

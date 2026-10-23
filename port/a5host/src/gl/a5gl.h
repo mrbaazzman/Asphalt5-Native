@@ -21,6 +21,7 @@ extern int a5gl_ui_dump_frame;
 // host buffers): returns the host pointer for an emulated address or NULL.
 extern uint8_t* (*a5gl_mem_direct)(uint64_t addr);
 void     a5gl_client_size(int* w, int* h);
+void     a5gl_view_rect(int* x, int* y, int* w, int* h);
 void     a5gl_pause_overlay(int on);
 void     a5gl_request_close(void);   // SH_EXIT: close the window / stop the loop
 void     a5gl_pump(void);             // service the message queue during long load calls

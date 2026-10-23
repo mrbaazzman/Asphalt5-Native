@@ -2139,7 +2139,7 @@ int main(int argc, char** argv) {
             if (mf && *mf) snprintf(mp, sizeof(mp), "%s", mf);
             else snprintf(mp, sizeof(mp), "%s\\A5_Ultimate_VNFS_2_854.mp4", game_dir);
             printf("[movie] mid-session test at f%d\n", frame); fflush(stdout);
-            a5movie_play(mp, scr_w, scr_h);
+            a5movie_play(mp, win_w, win_h);
         }
         // Debug: A5_FORCE_SAVE=<frame> sets the game's save-dirty flag so the
         // next Game::SaveData writes data.sav (verifies the save round-trip).
@@ -2194,7 +2194,7 @@ int main(int argc, char** argv) {
         // engine advance (movie.c clears game+0x1d72 via the flag below).
         if (g_movie_pending) {
             g_movie_pending = 0;
-            a5movie_play(g_movie_path, scr_w, scr_h);
+            a5movie_play(g_movie_path, win_w, win_h);
             uint32_t gm = rd32(BASE + 0x1fa798);
             if (gm) uw32(gm + 0x1d72, 0);
         }

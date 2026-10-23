@@ -7,7 +7,8 @@
 // The host records the request (the JNI shim), then plays the movie between
 // frames: MF's SourceReader decodes the video (RGB32) into a GL texture drawn
 // full-screen and the audio (PCM 44100 stereo) into the audio mixer's movie
-// ring.  ESC skips; A5_NO_MOVIE=1 disables playback entirely.
+// ring.  ESC or a mouse click (after a short focus guard) skips;
+// A5_NO_MOVIE=1 disables playback entirely.
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -197,6 +198,7 @@ int a5movie_play(const char* path, int w, int h) {
     LONGLONG t_start = -1, audio_ts = 0;
     int vdone = (vstream < 0), adone = (astream < 0), skip = 0;
     int fed_frames = 0;
+    ULONGLONG wall_start = GetTickCount64();
     // A5_MOVIE_SECS=<n>: auto-stop after n seconds (scripted tests)
     int max_ms = getenv("A5_MOVIE_SECS") ? atoi(getenv("A5_MOVIE_SECS")) * 1000 : 0;
     const char* shot_prefix = getenv("A5_MOVIE_SHOT");
@@ -257,11 +259,17 @@ int a5movie_play(const char* path, int w, int h) {
             }
             audio_ts = ats;
         }
-        // Skip on ESC only: a click is how the player focuses the game window
-        // and it used to kill the intro movie instantly.
-        int evt, mx, my;
-        while (a5gl_poll_input(&evt, &mx, &my)) { }
+        // Skip on ESC or a mouse click.  Ignore clicks during the first 500 ms
+        // so the click that focuses the game window does not kill the intro.
+        int evt, mx, my, clicked = 0;
+        while (a5gl_poll_input(&evt, &mx, &my)) {
+            if (evt == 0) clicked = 1;
+        }
         if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) skip = 1;
+        if (GetTickCount64() - wall_start > 500 &&
+            (clicked ||
+             (GetAsyncKeyState(VK_LBUTTON) & 0x8000) ||
+             (GetAsyncKeyState(VK_RBUTTON) & 0x8000))) skip = 1;
         if (!a5gl_poll()) { skip = 1; }
         // A5_MOVIE_SECS / A5_MOVIE_SHOT (scripted tests)
         {

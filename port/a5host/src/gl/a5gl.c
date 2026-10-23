@@ -94,6 +94,8 @@ static int win_w, win_h;
 // viewport/scissor bridge scales between the two, preserving the 854x480 UI
 // layout while rasterizing at the real window resolution.
 static int gl_logical_w = 854, gl_logical_h = 480;
+// Aspect-fit render rectangle inside the window (letterbox/pillarbox).
+static int gl_view_x = 0, gl_view_y = 0, gl_view_w = 0, gl_view_h = 0;
 // Level-0 texture upload scale.  At 1080p this is 1920/854 ~= 2.25: UI atlases
 // and 3D textures are resampled so their texel density matches the frame.
 static float gl_tex_scale = 1.0f;
@@ -125,6 +127,9 @@ static void push_input(int type, int x, int y) {
 }
 
 void a5gl_client_size(int* w, int* h) { *w = win_w; *h = win_h; }
+void a5gl_view_rect(int* x, int* y, int* w, int* h) {
+    *x = gl_view_x; *y = gl_view_y; *w = gl_view_w; *h = gl_view_h;
+}
 
 // Service the window message queue between emulator slices of a long load
 // call.  Without this the OS marks the window "Not Responding" while the
@@ -280,8 +285,28 @@ int a5gl_init(uc_engine* uc, int w, int h,
     win_w = w; win_h = h;
     gl_logical_w = logical_w > 0 ? logical_w : w;
     gl_logical_h = logical_h > 0 ? logical_h : h;
-    // Texture density follows the smaller axis ratio (preserves aspect for
-    // non-16:9 windows).  A5_TEXSCALE=off/1..4 overrides.
+    // Preserve the logical aspect inside arbitrary windows.  A5_ASPECT=stretch
+    // keeps the old fill-the-window behavior for diagnostics.
+    {
+        int vw = w, vh = h;
+        int stretch = getenv("A5_ASPECT") && !strcmp(getenv("A5_ASPECT"), "stretch");
+        if (!stretch && gl_logical_w > 0 && gl_logical_h > 0) {
+            // The 854x480 design is effectively 16:9 (427:240 would leave a
+            // one-pixel bar at 1080p); target the standard 16:9 frame.
+            vh = (int)((long long)w * 9 / 16);
+            if (vh > h) {
+                vh = h;
+                vw = (int)((long long)h * 16 / 9);
+            }
+            if (vw < 1) vw = 1;
+            if (vh < 1) vh = 1;
+        }
+        gl_view_w = vw;
+        gl_view_h = vh;
+        gl_view_x = (w - vw) / 2;
+        gl_view_y = (h - vh) / 2;
+    }
+    // Texture density follows the render rect.  A5_TEXSCALE=off/1..4 overrides.
     {
         float ts = 1.0f;
         const char* tse = getenv("A5_TEXSCALE");
@@ -289,15 +314,16 @@ int a5gl_init(uc_engine* uc, int w, int h,
             ts = 1.0f;
         } else if (tse && strcmp(tse, "auto") != 0) {
             ts = (float)atof(tse);
-        } else if (win_w > 0 && win_h > 0 && gl_logical_w > 0 && gl_logical_h > 0) {
-            float fx = (float)win_w / (float)gl_logical_w;
-            float fy = (float)win_h / (float)gl_logical_h;
+        } else if (gl_view_w > 0 && gl_view_h > 0 && gl_logical_w > 0 && gl_logical_h > 0) {
+            float fx = (float)gl_view_w / (float)gl_logical_w;
+            float fy = (float)gl_view_h / (float)gl_logical_h;
             ts = fx < fy ? fx : fy;
         }
         if (ts < 1.0f) ts = 1.0f;
         if (ts > 4.0f) ts = 4.0f;
         gl_tex_scale = ts;
-        printf("[gl] texture scale %.3fx\n", gl_tex_scale);
+        printf("[gl] view %d,%d %dx%d, texture scale %.3fx\n",
+               gl_view_x, gl_view_y, gl_view_w, gl_view_h, gl_tex_scale);
     }
     GL_DEBUG = getenv("A5GL_DEBUG") != NULL;
 
@@ -915,8 +941,50 @@ static void draw_test_quads(void) {
     }
 }
 
+static void draw_letterbox(void) {
+    if (gl_view_x <= 0 && gl_view_y <= 0 &&
+        gl_view_w >= win_w && gl_view_h >= win_h) return;
+    typedef void (*vi_t)(int,int,int,int);
+    typedef void (*en_t)(unsigned);
+    typedef void (*sc_t)(int,int,int,int);
+    typedef void (*cc_t)(float,float,float,float);
+    typedef void (*gf_t)(unsigned,float*);
+    typedef unsigned char (*ie_t)(unsigned);
+    typedef void (*cl_t)(unsigned);
+    vi_t vp = (vi_t)gl_load("glViewport");
+    en_t en = (en_t)gl_load("glEnable");
+    en_t dis = (en_t)gl_load("glDisable");
+    sc_t sc = (sc_t)gl_load("glScissor");
+    cc_t cc = (cc_t)gl_load("glClearColor");
+    gf_t gf = (gf_t)gl_load("glGetFloatv");
+    ie_t ie = (ie_t)gl_load("glIsEnabled");
+    cl_t cl = (cl_t)gl_load("glClear");
+    if (!vp || !en || !dis || !sc || !cc || !gf || !ie || !cl) return;
+    float old[4] = {0,0,0,1};
+    gf(0x0C22, old);                    // GL_COLOR_CLEAR_VALUE
+    int scissor_was = ie(0x0C11);       // GL_SCISSOR_TEST
+    vp(0, 0, win_w, win_h);
+    en(0x0C11);
+    cc(0, 0, 0, 1);
+    if (gl_view_y > 0) {
+        sc(0, 0, win_w, gl_view_y);
+        cl(0x4000);                     // GL_COLOR_BUFFER_BIT
+        sc(0, win_h - gl_view_y, win_w, gl_view_y);
+        cl(0x4000);
+    }
+    if (gl_view_x > 0) {
+        sc(0, 0, gl_view_x, win_h);
+        cl(0x4000);
+        sc(win_w - gl_view_x, 0, gl_view_x, win_h);
+        cl(0x4000);
+    }
+    if (!scissor_was) dis(0x0C11);
+    cc(old[0], old[1], old[2], old[3]);
+}
+
 void a5gl_swap(void) {
     draw_test_quads();
+    draw_letterbox();
     SwapBuffers(hdc);   // gdi32 (linked); NOT exported by opengl32
 }
 
@@ -971,6 +1039,7 @@ void a5gl_probe_pixels(void) {
 
 void a5gl_screenshot_bmp(const char* path) {
     draw_test_quads();
+    draw_letterbox();
     typedef void (*rp_t)(int,int,int,int,unsigned,unsigned,void*);
     rp_t rp = (rp_t)gl_load("glReadPixels");
     if (!rp) return;

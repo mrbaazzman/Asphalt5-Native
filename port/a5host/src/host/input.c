@@ -37,6 +37,7 @@
 #include <string.h>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "a5gl.h"
 #include "input.h"
 
 #define A5_BASE 0x10000000u
@@ -280,6 +281,17 @@ static void touch_release_now(void) {
 }
 
 static void scaled(int* x, int* y) {
+    int vx = 0, vy = 0, vw = 0, vh = 0;
+    a5gl_view_rect(&vx, &vy, &vw, &vh);
+    if (vw > 0 && vh > 0) {
+        *x = (int)((long long)(*x - vx) * s_scr_w / vw);
+        *y = (int)((long long)(*y - vy) * s_scr_h / vh);
+        if (*x < 0) *x = 0;
+        if (*y < 0) *y = 0;
+        if (*x >= s_scr_w) *x = s_scr_w - 1;
+        if (*y >= s_scr_h) *y = s_scr_h - 1;
+        return;
+    }
     int cw = s_scr_w, ch = s_scr_h;
     if (s_size) { s_size(&cw, &ch); }
     if (cw > 0 && ch > 0 && (cw != s_scr_w || ch != s_scr_h)) {
