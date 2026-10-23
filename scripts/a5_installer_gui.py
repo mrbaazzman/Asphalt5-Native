@@ -35,7 +35,7 @@ import zipfile
 from strip_engine import strip_engine
 
 APP_NAME = "Asphalt 5 Native"
-APP_VERSION = "1.0"
+APP_VERSION = "1.1"
 EXPECTED_SO_SHA256 = "2966c986c73e71e7d2fa791a2f3a371749c7db183d7c40ff6641a57f01b78206"
 SO_ENTRY = "lib/armeabi/libasphalt5.so"
 ASSET_NAMES = ("gameloft_logo", "interface_menu", "font_menu")
@@ -193,6 +193,14 @@ FIRST LAUNCH - GAME DATA
   starts.  After that, no download is needed.  If the Gameloft server is
   unreachable, the game cannot install its data; in that case use a source
   build with --packs/--installed-data.
+
+DISPLAY
+  Runs at 1920x1080 physical pixels by default (DPI-aware, borderless when
+  the window fills the display).  The original 854x480 UI layout is scaled
+  to the render resolution; 3D is rasterized at the window size.
+  A5_WINDOW=1600x900   run at another resolution
+  A5_WINDOWED=1        force a normal bordered window
+  A5_SCREEN=854x480    override the logical UI layout (advanced)
 
 CONTROLS
   Mouse / touch : menus, HUD, pedals, nitro and pause

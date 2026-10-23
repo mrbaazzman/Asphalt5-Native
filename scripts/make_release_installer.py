@@ -41,6 +41,9 @@ QUICK START
   4. Launch the game.
 
 The game is a Windows GUI application: it runs without a console window.
+It renders at 1920x1080 physical pixels by default (DPI-aware), scaling the
+original 854x480 UI layout to the render resolution.  Use A5_WINDOW=1600x900
+for another size or A5_WINDOWED=1 for a bordered window.
 Diagnostics go to %TEMP%\\Asphalt5.log.  The installed folder contains only
 Asphalt5.exe, saves and the game data - no .so, APK or installer files.
 

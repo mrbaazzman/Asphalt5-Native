@@ -135,6 +135,33 @@ builder never downloads, bundles, or redistributes game data.
 The keyboard path goes through the engine's own key system
 (`Game::InputKeyBoard`), so in-game remapping and menus work.
 
+## Resolution
+
+The default render size is **1920×1080 physical pixels**. The process is
+DPI-aware, so Windows display scaling does not blur or virtualize the game.
+On a 1080p display the window is borderless; on smaller displays it caps to
+the desktop.
+
+The engine's original **854×480 logical layout** is preserved and scaled to
+the render resolution. The GL bridge scales `glViewport`/`glScissor` and input
+coordinates; 3D is rasterized at the real window size and the 2D UI/HUD is
+composited over it.
+
+| Variable | Effect |
+|---|---|
+| `A5_WINDOW=WxH` | render/window size (default 1920×1080 or desktop) |
+| `A5_WINDOWED=1` | force a bordered window instead of borderless |
+| `A5_BORDERLESS=1` | force borderless even below desktop size |
+| `A5_SCREEN=WxH` | override the logical layout resolution (advanced/legacy) |
+
+For example:
+
+```bat
+set A5_WINDOW=1600x900
+set A5_WINDOWED=1
+Asphalt5.exe
+```
+
 ---
 
 ## How it works

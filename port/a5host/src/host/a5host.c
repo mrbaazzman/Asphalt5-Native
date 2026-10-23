@@ -1206,6 +1206,16 @@ static void ui_dump(void) {
 }
 
 int main(int argc, char** argv) {
+    // Request physical pixels.  Without this, a 125% Windows display scale
+    // makes GetSystemMetrics report 1536x864 for a 1920x1080 panel, and the
+    // compositor upscales the whole game (blurring UI and 3D).
+    {
+        HMODULE u32 = GetModuleHandleA("user32.dll");
+        typedef BOOL (WINAPI *set_dpi_ctx_t)(HANDLE);
+        set_dpi_ctx_t set_ctx = u32 ? (set_dpi_ctx_t)GetProcAddress(
+            u32, "SetProcessDpiAwarenessContext") : NULL;
+        if (!set_ctx || !set_ctx((HANDLE)-4)) SetProcessDPIAware();
+    }
     // GUI-subsystem release build: there is no console, so route the
     // diagnostic log to %TEMP%\Asphalt5.log instead of dropping it.
     if (!GetConsoleWindow()) {
@@ -1287,11 +1297,33 @@ int main(int argc, char** argv) {
         snprintf(game_dir, sizeof(game_dir), "%s", (dist_ok || !dev_ok) ? distdir : devdir);
     }
     printf("a5host: data dir = %s\n", game_dir);
-    // screen size: 854x480 is the game's native design resolution (the .data
-    // defaults of OS_SCREEN_W/H are 854/480 and the whole menu layout is built
-    // for it). A5_SCREEN=WxH overrides.
+    // Logical screen/layout is the game's native 854x480 design resolution.
+    // The window additionally has a render resolution; the GL bridge scales
+    // viewport/scissor from logical to window space.  A5_SCREEN=WxH overrides
+    // the logical layout (legacy diagnostics), A5_WINDOW=WxH the real window.
     int scr_w = 854, scr_h = 480;
-    { const char* ss = getenv("A5_SCREEN"); if (ss) sscanf(ss, "%dx%d", &scr_w, &scr_h); }
+    int win_w = 0, win_h = 0;
+    const char* ss = getenv("A5_SCREEN");
+    const char* ws = getenv("A5_WINDOW");
+    if (ss) sscanf(ss, "%dx%d", &scr_w, &scr_h);
+    if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
+    if (win_w <= 0 || win_h <= 0) {
+        if (ss) {
+            // backward-compatible diagnostic behaviour: A5_SCREEN alone
+            // means the old "same logical and window size" test mode
+            win_w = scr_w;
+            win_h = scr_h;
+        } else {
+            win_w = 1920;
+            win_h = 1080;
+            int dw = GetSystemMetrics(SM_CXSCREEN);
+            int dh = GetSystemMetrics(SM_CYSCREEN);
+            if (dw > 0 && win_w > dw) win_w = dw;
+            if (dh > 0 && win_h > dh) win_h = dh;
+        }
+    }
+    if (win_w < 320) win_w = 320;
+    if (win_h < 200) win_h = 200;
     vt_enabled = getenv("A5BOOT_FASTTIME") != NULL;
     // Default: run live (until the window is closed) - a double-click on the
     // exe boots straight into the game. Scripted runs set A5BOOT_FRAMES.
@@ -1699,9 +1731,11 @@ int main(int argc, char** argv) {
                n_init, scr_w, scr_h);
     }
 
-    // GL window
-    printf("a5host: screen = %dx%d\n", scr_w, scr_h);
-    if (a5gl_init(g_uc, scr_w, scr_h, "Asphalt 5 - a5host (real engine)") != 0) return 1;
+    // GL window: logical layout vs actual render/window size
+    printf("a5host: logical screen = %dx%d, window = %dx%d\n",
+           scr_w, scr_h, win_w, win_h);
+    if (a5gl_init(g_uc, win_w, win_h, scr_w, scr_h,
+                  "Asphalt 5 - a5host (real engine)") != 0) return 1;
     a5gl_mem_direct = mem_host;   // direct access to the host-backed emulated memory
     { const char* uf = getenv("A5GL_UIFRAME"); if (uf) a5gl_ui_dump_frame = atoi(uf); }
     g_status_log = fopen("a5host_status.txt", "w");

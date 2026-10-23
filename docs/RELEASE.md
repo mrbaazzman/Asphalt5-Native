@@ -41,7 +41,9 @@ required.
    - embeds that data image inside `Asphalt5.exe`;
    - stages the original installer sprites in a cache outside the game folder;
    - copies the bundled GUI-subsystem native host.
-4. Launch the game (no console window).
+4. Launch the game (no console window). It runs at 1920×1080 physical pixels
+   by default, DPI-aware and borderless on a 1080p display. The original
+   854×480 UI layout is scaled to the render resolution.
 5. On first launch the **game's own installer** automatically downloads the
    data pack from Gameloft and writes it to
    `sdcard\gameloft\games\asphalt5\`.

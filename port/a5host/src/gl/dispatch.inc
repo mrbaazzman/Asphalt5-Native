@@ -134,6 +134,29 @@ static uint32_t a5gl_call_inner(const char* name, const uint32_t* raw, uint32_t 
     const char* spec = g->spec;
     int n = ce ? ce->nargs : (int)strlen(spec);
 
+    if (strcmp(name, "glViewport") == 0 || strcmp(name, "glScissor") == 0) {
+        int x = (int)arg_i(raw, 0), y = (int)arg_i(raw, 1);
+        int w = (int)arg_i(raw, 2), h = (int)arg_i(raw, 3);
+        int rx = x, ry = y, rw = w, rh = h;
+        // The engine's UI is authored in 854x480.  Scale its viewport and
+        // scissor rectangles to the real window; leave already-window-sized
+        // rectangles alone (raw movie/installer paths use those).
+        if (gl_logical_w > 0 && gl_logical_h > 0 &&
+            win_w > 0 && win_h > 0 &&
+            !(w == win_w && h == win_h)) {
+            int x0 = (int)((long long)x * win_w / gl_logical_w);
+            int x1 = (int)((long long)(x + w) * win_w / gl_logical_w);
+            int y0 = (int)((long long)y * win_h / gl_logical_h);
+            int y1 = (int)((long long)(y + h) * win_h / gl_logical_h);
+            rx = x0; ry = y0; rw = x1 - x0; rh = y1 - y0;
+        }
+        if (getenv("A5_GL_VIEWPORT_DEBUG"))
+            printf("[gl] %s logical(%d,%d,%d,%d) real(%d,%d,%d,%d) window=%dx%d\n",
+                   name, x, y, w, h, rx, ry, rw, rh, win_w, win_h);
+        ((void(*)(int,int,int,int))g->fn)(rx, ry, rw, rh);
+        return 0;
+    }
+
     // ---- hot handlers (tag-cached: no per-call string comparisons) ----
     switch (ce ? ce->tag : TAG_TAIL) {
     case TAG_ACTIVETEX: {
@@ -151,6 +174,13 @@ static uint32_t a5gl_call_inner(const char* name, const uint32_t* raw, uint32_t 
         uint32_t p = raw[0];
         float data[16];
         if (p) read_mem(p, data, 64);
+        if (gl_matrix_mode == 0x1701 && getenv("A5_GL_PROJ_DEBUG")) {
+            static int pn = 0;
+            if (pn++ < 24) {
+                printf("[proj] caller=%#x m=", lr);
+                for (int mi = 0; mi < 16; mi++) printf("%.4f%s", data[mi], mi == 15 ? "\n" : ",");
+            }
+        }
         ((void(*)(const float*))g->fn)(data);
         return 0;
     }

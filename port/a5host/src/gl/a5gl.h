@@ -3,7 +3,8 @@
 #include <stdint.h>
 #include "ucapi.h"
 
-int      a5gl_init(uc_engine* uc, int w, int h, const char* title);
+int      a5gl_init(uc_engine* uc, int w, int h,
+                   int logical_w, int logical_h, const char* title);
 uint32_t a5gl_call(const char* name, const uint32_t* raw, uint32_t lr);
 void     a5gl_swap(void);
 int      a5gl_poll(void);           // returns 0 when the window was closed

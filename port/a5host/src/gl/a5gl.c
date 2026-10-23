@@ -90,6 +90,10 @@ static GLFunc* gl_find(const char* name) {
 // ---------------------------------------------------------------- window
 static HWND hwnd; static HDC hdc; static HGLRC hglrc;
 static int win_w, win_h;
+// The engine's UI/layout coordinate space.  The window can be larger; the
+// viewport/scissor bridge scales between the two, preserving the 854x480 UI
+// layout while rasterizing at the real window resolution.
+static int gl_logical_w = 854, gl_logical_h = 480;
 static volatile LONG win_closed = 0;
 // The window and its message queue live on a dedicated UI thread.  The main
 // thread runs the engine/GL; that way Windows keeps the window responsive
@@ -235,11 +239,15 @@ static DWORD WINAPI ui_thread_proc(LPVOID param) {
     }
     wchar_t wtitle[256];
     MultiByteToWideChar(CP_UTF8, 0, ui_title, -1, wtitle, 256);
+    int dw = GetSystemMetrics(SM_CXSCREEN);
+    int dh = GetSystemMetrics(SM_CYSCREEN);
+    int borderless = !ui_hidden && !getenv("A5_WINDOWED") &&
+                     (getenv("A5_BORDERLESS") || (ui_w >= dw && ui_h >= dh));
     RECT wr = {0, 0, ui_w, ui_h};
-    AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
-    hwnd = CreateWindowExW(0, L"a5hostGL", wtitle,
-                           ui_hidden ? WS_POPUP : WS_OVERLAPPEDWINDOW,
-                           ui_hidden ? -4000 : 80, ui_hidden ? -4000 : 60,
+    DWORD style = (ui_hidden || borderless) ? WS_POPUP : WS_OVERLAPPEDWINDOW;
+    if (!ui_hidden && !borderless) AdjustWindowRect(&wr, style, FALSE);
+    hwnd = CreateWindowExW(0, L"a5hostGL", wtitle, style,
+                           ui_hidden ? -4000 : 0, ui_hidden ? -4000 : 0,
                            wr.right - wr.left, wr.bottom - wr.top, NULL, NULL, hi, NULL);
     if (!hwnd) {
         fprintf(stderr, "a5gl: CreateWindow failed\n");
@@ -261,11 +269,14 @@ static DWORD WINAPI ui_thread_proc(LPVOID param) {
     return 0;
 }
 
-int a5gl_init(uc_engine* uc, int w, int h, const char* title) {
+int a5gl_init(uc_engine* uc, int w, int h,
+              int logical_w, int logical_h, const char* title) {
     if (ucapi_load() != 0) return -1;
     g_uc = uc;          // this TU's copy of the header's engine handle
     GL_UC = uc;
     win_w = w; win_h = h;
+    gl_logical_w = logical_w > 0 ? logical_w : w;
+    gl_logical_h = logical_h > 0 ? logical_h : h;
     GL_DEBUG = getenv("A5GL_DEBUG") != NULL;
 
     // The window is created and pumped on a dedicated UI thread; the main
