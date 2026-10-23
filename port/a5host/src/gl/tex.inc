@@ -32,6 +32,99 @@ static int tex_data_size(unsigned fmt, unsigned type, int w, int h) {
     return n * per;
 }
 
+// Catmull-Rom kernel for a sharp (but not ringing) 2D resample.
+static float cubic_w(float x) {
+    x = fabsf(x);
+    if (x <= 1.0f) return (1.5f * x - 2.5f) * x * x + 1.0f;
+    if (x < 2.0f) return ((-0.5f * x + 2.5f) * x - 4.0f) * x + 2.0f;
+    return 0.0f;
+}
+
+static unsigned char* resize_rgba(const unsigned char* src, int sw, int sh,
+                                  int dw, int dh) {
+    unsigned char* tmp = (unsigned char*)malloc((size_t)dw * sh * 4);
+    unsigned char* out = (unsigned char*)malloc((size_t)dw * dh * 4);
+    if (!tmp || !out) { free(tmp); free(out); return NULL; }
+    // horizontal
+    for (int y = 0; y < sh; y++) {
+        const unsigned char* row = src + (size_t)y * sw * 4;
+        unsigned char* drow = tmp + (size_t)y * dw * 4;
+        for (int x = 0; x < dw; x++) {
+            float sx = ((float)x + 0.5f) * sw / dw - 0.5f;
+            int ix = (int)floorf(sx);
+            float fx = sx - (float)ix;
+            float r = 0, g = 0, b = 0, a = 0;
+            for (int k = -1; k <= 2; k++) {
+                int xi = ix + k; if (xi < 0) xi = 0; if (xi >= sw) xi = sw - 1;
+                float w = cubic_w((float)k - fx);
+                const unsigned char* p = row + (size_t)xi * 4;
+                r += p[0] * w; g += p[1] * w; b += p[2] * w; a += p[3] * w;
+            }
+            unsigned char* d = drow + (size_t)x * 4;
+            d[0] = (unsigned char)(r < 0 ? 0 : r > 255 ? 255 : r + 0.5f);
+            d[1] = (unsigned char)(g < 0 ? 0 : g > 255 ? 255 : g + 0.5f);
+            d[2] = (unsigned char)(b < 0 ? 0 : b > 255 ? 255 : b + 0.5f);
+            d[3] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a + 0.5f);
+        }
+    }
+    // vertical
+    for (int y = 0; y < dh; y++) {
+        float sy = ((float)y + 0.5f) * sh / dh - 0.5f;
+        int iy = (int)floorf(sy);
+        float fy = sy - (float)iy;
+        unsigned char* drow = out + (size_t)y * dw * 4;
+        for (int x = 0; x < dw; x++) {
+            float r = 0, g = 0, b = 0, a = 0;
+            for (int k = -1; k <= 2; k++) {
+                int yi = iy + k; if (yi < 0) yi = 0; if (yi >= sh) yi = sh - 1;
+                float w = cubic_w((float)k - fy);
+                const unsigned char* p = tmp + ((size_t)yi * dw + x) * 4;
+                r += p[0] * w; g += p[1] * w; b += p[2] * w; a += p[3] * w;
+            }
+            unsigned char* d = drow + (size_t)x * 4;
+            d[0] = (unsigned char)(r < 0 ? 0 : r > 255 ? 255 : r + 0.5f);
+            d[1] = (unsigned char)(g < 0 ? 0 : g > 255 ? 255 : g + 0.5f);
+            d[2] = (unsigned char)(b < 0 ? 0 : b > 255 ? 255 : b + 0.5f);
+            d[3] = (unsigned char)(a < 0 ? 0 : a > 255 ? 255 : a + 0.5f);
+        }
+    }
+    free(tmp);
+    return out;
+}
+
+// The renderer's filtering is intentionally non-mipmapped.  An upscaled
+// level 0 must not be paired with the original mip chain (or left incomplete
+// when mip uploads are skipped).  Force a complete single-level texture.
+static void force_base_level(unsigned target) {
+    if (gl_tex_scale <= 1.01f) return;
+    GLFunc* f = gl_find("glTexParameteri");
+    if (!f) return;
+    typedef void (*tp_t)(unsigned,unsigned,int);
+    tp_t tp = (tp_t)f->fn;
+    tp(target, 0x2801, 0x2601);     // GL_TEXTURE_MIN_FILTER = GL_LINEAR
+    tp(target, 0x2800, 0x2601);     // GL_TEXTURE_MAG_FILTER = GL_LINEAR
+    tp(target, 0x813C, 0);          // GL_TEXTURE_BASE_LEVEL
+    tp(target, 0x813D, 0);          // GL_TEXTURE_MAX_LEVEL
+}
+
+// Returns a newly allocated level-0 image, or NULL when no scaling is needed.
+static unsigned char* tex_upscale_rgba(const unsigned char* src, int w, int h,
+                                       int* nw, int* nh, int kind) {
+    *nw = w; *nh = h;
+    const char* tmode = getenv("A5_TEXSCALE_MODE");
+    if (tmode && strcmp(tmode, "raw") == 0 && kind != 0) return NULL;
+    if (tmode && strcmp(tmode, "compressed") == 0 && kind != 1) return NULL;
+    if (gl_tex_scale <= 1.01f || w < 4 || h < 4) return NULL;
+    int tw = (int)(w * gl_tex_scale + 0.5f);
+    int th = (int)(h * gl_tex_scale + 0.5f);
+    if (tw > 4096) tw = 4096;
+    if (th > 4096) th = 4096;
+    if (tw <= w && th <= h) return NULL;
+    unsigned char* out = resize_rgba(src, w, h, tw, th);
+    if (out) { *nw = tw; *nh = th; }
+    return out;
+}
+
 static void decode_paletted(unsigned fmt, int w, int h, const unsigned char* d, unsigned char* out) {
     int pal4 = (fmt == GL_PALETTE4_RGB8 || fmt == GL_PALETTE4_RGBA8 || fmt == GL_PALETTE4_R5_G6_B5 ||
                 fmt == GL_PALETTE4_RGBA4 || fmt == GL_PALETTE4_RGB5_A1);
@@ -143,6 +236,9 @@ static void padfix_dilate(int w, int h, unsigned char* rgba, const char* tag) {
 
 static void compressed_tex_image(unsigned target, int level, unsigned ifmt, int w, int h,
                                  int border, int size, uint32_t ptr) {
+    // Host filtering is non-mipmapped.  Once level 0 is resampled, original
+    // mip levels would be a mismatched chain; don't upload them.
+    if (level > 0 && gl_tex_scale > 1.01f && !getenv("A5_TEXSCALE_KEEP_MIPS")) return;
     static int tex_time = -1;
     if (tex_time < 0) tex_time = getenv("A5_TEX_TIME") ? 1 : 0;
     clock_t tt0 = clock();
@@ -247,7 +343,14 @@ static void compressed_tex_image(unsigned target, int level, unsigned ifmt, int 
     }
     typedef void (*ti_t)(unsigned,int,int,int,int,int,unsigned,unsigned,const void*);
     ti_t ti = (ti_t)gl_find("glTexImage2D")->fn;
-    ti(target, level, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+    int uw = w, uh = h;
+    unsigned char* up = (level == 0) ? tex_upscale_rgba(rgba, w, h, &uw, &uh, 1) : NULL;
+    ti(target, level, GL_RGBA, uw, uh, 0, GL_RGBA, GL_UNSIGNED_BYTE, up ? up : rgba);
+    force_base_level(target);
+    if (up && getenv("A5_TEXSCALE_DEBUG"))
+        printf("[texscale] compressed %dx%d -> %dx%d emu=%u fmt=%#x\n",
+               w, h, uw, uh, last_bound_emu, ifmt);
+    free(up);
     if (tex_time) {
         double t_all = (double)(clock() - tt0) / CLOCKS_PER_SEC;
         if (t_all > 0.03)

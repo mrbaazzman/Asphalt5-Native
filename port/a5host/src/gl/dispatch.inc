@@ -408,6 +408,7 @@ static uint32_t a5gl_call_inner(const char* name, const uint32_t* raw, uint32_t 
     }
     if (strcmp(name, "glTexImage2D") == 0) {
         unsigned target=arg_i(raw,0); int level=(int)arg_i(raw,1); int w=(int)arg_i(raw,3), h=(int)arg_i(raw,4);
+        if (level > 0 && gl_tex_scale > 1.01f && !getenv("A5_TEXSCALE_KEEP_MIPS")) return 0;
         unsigned fmt=arg_i(raw,6), type=arg_i(raw,7); uint32_t ptr=arg_i(raw,8);
         if (GL_DEBUG) printf("[tex] image fmt=%#x type=%#x %dx%d bound_emu=%u bound_real=%u\n", fmt, type, w, h, last_bound_emu, last_bound_real);
         typedef void (*ti_t)(unsigned,int,int,int,int,int,unsigned,unsigned,const void*);
@@ -480,7 +481,13 @@ static uint32_t a5gl_call_inner(const char* name, const uint32_t* raw, uint32_t 
                     for (int k = 0; k < w * h; k++) { rgba[k*4] = tc[ci][0]; rgba[k*4+1] = tc[ci][1]; rgba[k*4+2] = tc[ci][2]; rgba[k*4+3] = 255; }
                 }
             }
-            ti(target, level, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+            int uw = w, uh = h;
+            unsigned char* up = (level == 0) ? tex_upscale_rgba(rgba, w, h, &uw, &uh, 0) : NULL;
+            ti(target, level, GL_RGBA, uw, uh, 0, GL_RGBA, GL_UNSIGNED_BYTE, up ? up : rgba);
+            force_base_level(target);
+            if (up && getenv("A5_TEXSCALE_DEBUG"))
+                printf("[texscale] raw %dx%d -> %dx%d emu=%u\n", w, h, uw, uh, last_bound_emu);
+            free(up);
             static int dump_n = 0;
             int dumpall2 = getenv("A5GL_DUMPALL") != NULL;
             if (GL_DEBUG && level == 0 && w >= 64 && (dump_n < 8 || dumpall2)) {

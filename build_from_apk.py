@@ -198,9 +198,11 @@ def write_readme(out: pathlib.Path, data_mode: str) -> None:
 DISPLAY
   Default render size: 1920x1080 physical pixels (DPI-aware, borderless when
   it fills the display).  The original 854x480 UI layout is scaled to the
-  render resolution.
+  render resolution; level-0 textures are resampled to match.
   A5_WINDOW=1600x900   run at another resolution
   A5_WINDOWED=1        force a normal bordered window
+  A5_TEXSCALE=auto     texture density (default follows render scale)
+  A5_TEXSCALE=off      keep original texture resolution
 
 FILES
   Asphalt5.exe                    native game (engine data embedded; no .so)

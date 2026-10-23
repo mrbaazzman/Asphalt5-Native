@@ -94,6 +94,9 @@ static int win_w, win_h;
 // viewport/scissor bridge scales between the two, preserving the 854x480 UI
 // layout while rasterizing at the real window resolution.
 static int gl_logical_w = 854, gl_logical_h = 480;
+// Level-0 texture upload scale.  At 1080p this is 1920/854 ~= 2.25: UI atlases
+// and 3D textures are resampled so their texel density matches the frame.
+static float gl_tex_scale = 1.0f;
 static volatile LONG win_closed = 0;
 // The window and its message queue live on a dedicated UI thread.  The main
 // thread runs the engine/GL; that way Windows keeps the window responsive
@@ -277,6 +280,25 @@ int a5gl_init(uc_engine* uc, int w, int h,
     win_w = w; win_h = h;
     gl_logical_w = logical_w > 0 ? logical_w : w;
     gl_logical_h = logical_h > 0 ? logical_h : h;
+    // Texture density follows the smaller axis ratio (preserves aspect for
+    // non-16:9 windows).  A5_TEXSCALE=off/1..4 overrides.
+    {
+        float ts = 1.0f;
+        const char* tse = getenv("A5_TEXSCALE");
+        if (tse && (!strcmp(tse, "off") || !strcmp(tse, "0"))) {
+            ts = 1.0f;
+        } else if (tse && strcmp(tse, "auto") != 0) {
+            ts = (float)atof(tse);
+        } else if (win_w > 0 && win_h > 0 && gl_logical_w > 0 && gl_logical_h > 0) {
+            float fx = (float)win_w / (float)gl_logical_w;
+            float fy = (float)win_h / (float)gl_logical_h;
+            ts = fx < fy ? fx : fy;
+        }
+        if (ts < 1.0f) ts = 1.0f;
+        if (ts > 4.0f) ts = 4.0f;
+        gl_tex_scale = ts;
+        printf("[gl] texture scale %.3fx\n", gl_tex_scale);
+    }
     GL_DEBUG = getenv("A5GL_DEBUG") != NULL;
 
     // The window is created and pumped on a dedicated UI thread; the main

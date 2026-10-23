@@ -35,7 +35,7 @@ import zipfile
 from strip_engine import strip_engine
 
 APP_NAME = "Asphalt 5 Native"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 EXPECTED_SO_SHA256 = "2966c986c73e71e7d2fa791a2f3a371749c7db183d7c40ff6641a57f01b78206"
 SO_ENTRY = "lib/armeabi/libasphalt5.so"
 ASSET_NAMES = ("gameloft_logo", "interface_menu", "font_menu")
@@ -201,6 +201,8 @@ DISPLAY
   A5_WINDOW=1600x900   run at another resolution
   A5_WINDOWED=1        force a normal bordered window
   A5_SCREEN=854x480    override the logical UI layout (advanced)
+  A5_TEXSCALE=auto     texture density (default follows render scale)
+  A5_TEXSCALE=off      keep original texture resolution
 
 CONTROLS
   Mouse / touch : menus, HUD, pedals, nitro and pause

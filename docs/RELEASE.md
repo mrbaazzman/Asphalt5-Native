@@ -43,7 +43,9 @@ required.
    - copies the bundled GUI-subsystem native host.
 4. Launch the game (no console window). It runs at 1920×1080 physical pixels
    by default, DPI-aware and borderless on a 1080p display. The original
-   854×480 UI layout is scaled to the render resolution.
+   854×480 UI layout and level-0 textures are scaled to the render resolution
+   (`A5_TEXSCALE=auto`; 2.25× at 1080p). Use `A5_TEXSCALE=off` for original
+   texture resolution.
 5. On first launch the **game's own installer** automatically downloads the
    data pack from Gameloft and writes it to
    `sdcard\gameloft\games\asphalt5\`.

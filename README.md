@@ -147,12 +147,20 @@ the render resolution. The GL bridge scales `glViewport`/`glScissor` and input
 coordinates; 3D is rasterized at the real window size and the 2D UI/HUD is
 composited over it.
 
+Level-0 textures are resampled at upload time with a Catmull-Rom filter to the
+render-scale density (2.25× at 1080p), and forced to a complete single mip
+level so the upscaled image is sampled correctly. This applies to both UI
+atlases and 3D textures. It increases texel density; it does not invent new
+art detail. Set `A5_TEXSCALE=off` to keep original texture resolution.
+
 | Variable | Effect |
 |---|---|
 | `A5_WINDOW=WxH` | render/window size (default 1920×1080 or desktop) |
 | `A5_WINDOWED=1` | force a bordered window instead of borderless |
 | `A5_BORDERLESS=1` | force borderless even below desktop size |
 | `A5_SCREEN=WxH` | override the logical layout resolution (advanced/legacy) |
+| `A5_TEXSCALE=auto` | upscale level-0 textures to render density (default) |
+| `A5_TEXSCALE=off` | keep original texture resolution |
 
 For example:
 
