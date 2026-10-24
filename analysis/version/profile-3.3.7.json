@@ -151,6 +151,7 @@
   "0x178fe4": 1548032,
   "0x1791fc": 1548568,
   "0x17920c": 1548600,
+  "0x179258": 1548584,
   "0x17a66c": 1553752,
   "0x17a730": 1553948,
   "0x17a79c": 1554056,
@@ -5748,5 +5749,6 @@
  "default_window": "1920x1080",
  "data_manifest": "data-3.3.7.json",
  "master_url_pvrt": "http://dl.gameloft.com/hdplus/android/asphalt5/Samsung_P1000_Galaxy_Tab/ml/3.3.3/AndroidResources_PVRT.zip",
- "master_url_atc": ""
+ "master_url_atc": "",
+ "direct_pad": true
 }

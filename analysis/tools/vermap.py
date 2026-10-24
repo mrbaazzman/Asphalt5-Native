@@ -453,7 +453,8 @@ def rewrite_map(src_root, dst_root, address_map):
 def gen_profile(ref_snapshot, ref_so, target_so, src_root, list_path, out_path,
                 label="", tolerant_data=False, default_pvrt=False,
                 auto_start_click=False, logical_screen="", default_window="",
-                data_manifest="", master_url_pvrt="", master_url_atc=""):
+                data_manifest="", master_url_pvrt="", master_url_atc="",
+                direct_pad=False):
     ref = Engine(ref_so)
     tgt = Engine(target_so)
     res = Resolver(ref_snapshot, tgt)
@@ -528,6 +529,7 @@ def gen_profile(ref_snapshot, ref_so, target_so, src_root, list_path, out_path,
         "data_manifest": data_manifest,
         "master_url_pvrt": master_url_pvrt,
         "master_url_atc": master_url_atc,
+        "direct_pad": bool(direct_pad),
     }
     pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(out_path).write_text(json.dumps(profile, indent=1) + "\n",
@@ -720,6 +722,8 @@ def main(argv=None):
                    help="PVRT master download URL from the APK's GameInstaller")
     p.add_argument("--master-url-atc", default="",
                    help="ATC master download URL from the APK's GameInstaller")
+    p.add_argument("--direct-pad", action="store_true",
+                   help="driving keys inject GamePad masks (3.3.7 touch build)")
 
     a = ap.parse_args(argv)
     if a.cmd == "snapshot":
@@ -740,7 +744,8 @@ def main(argv=None):
         gen_profile(a.snapshot, a.ref_so, a.target_so, a.src, a.list, a.out,
                     a.label, a.tolerant_data, a.default_pvrt,
                     a.auto_start_click, a.logical_screen, a.default_window,
-                    a.data_manifest, a.master_url_pvrt, a.master_url_atc)
+                    a.data_manifest, a.master_url_pvrt, a.master_url_atc,
+                    a.direct_pad)
     return 0
 
 

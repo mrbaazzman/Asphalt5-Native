@@ -206,6 +206,12 @@ rules, the 3.3.7 differences (renamed Java package, `__android_log_write`, the
 The keyboard path goes through the engine's own key system
 (`Game::InputKeyBoard`), so in-game remapping and menus work.
 
+**3.3.7 controls:** that build's `Game::GetKeyMask` only recognizes
+Back/Camera/Space, so the host feeds the engine's own GamePad masks directly
+(`1` left, `2` right, `4` brake, `0x4000` nitro) for driving. Menus are
+mouse-driven; Esc opens/closes the pause menu. Diagnostics:
+`A5_KEY_DEBUG=1` logs key edges, `A5_PAD_DEBUG=1` logs the injected pad state.
+
 **Click the mouse or press Esc to skip the intro/reward video.** Clicks in the
 first 500 ms are ignored so focusing the game window does not skip it.
 

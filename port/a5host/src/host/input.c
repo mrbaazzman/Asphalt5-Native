@@ -46,6 +46,10 @@
 #define FN_TOUCH_DOWN     0x5d5c4u
 #define FN_TOUCH_UP       0x5d5b4u
 #define FN_TOUCH_MOVE     0x5d61cu
+// 3.4.1 reference addresses; the version profile rewrites them for 3.3.7.
+#define FN_GET_PAD        0x178f60u
+#define FN_PAD_PRESS      0x1791fcu
+#define FN_PAD_RELEASE    0x179258u
 #define ADDR_GAME         0x1fa798u
 #define ADDR_CTRL_MODE    0x1f85f0u   // CGameSettings::controlMode (byte)
 #define ADDR_ACC_Y        0xafe27cu   // mAccelerometerY (device tilt axis)
@@ -151,9 +155,44 @@ static int in_race(void) {
     return sp && s_rd32(sp) == A5_BASE + 0x1efaa8u;   // GS_Run vtable
 }
 
+#ifdef A5_DIRECT_PAD
+// 3.3.7's Game::GetKeyMask only recognizes Back/Camera/Space; it returns 0 for
+// the Android driving keys (19-23).  The engine's own on-screen buttons use
+// these pad masks, so feed them straight into GamePad for keyboard/PC input.
+static void pad_key(int code, int down) {
+    uint32_t mask = 0;
+    switch (code) {
+        case 21: mask = 1u;      break;   // steer left
+        case 22: mask = 2u;      break;   // steer right
+        case 20: mask = 4u;      break;   // brake / reverse
+        case 23: mask = 0x4000u; break;   // nitro
+        default: return;
+    }
+    uint32_t game = s_rd32(A5_BASE + ADDR_GAME);
+    if (!game) return;
+    uint32_t mgr = s_rd32(game + 0x1bc0);
+    if (!mgr) return;
+    uint32_t pad = s_call(A5_BASE + FN_GET_PAD, (uint32_t[]){ mgr, 0 }, 2);
+    if (!pad) return;
+    s_call(A5_BASE + (down ? FN_PAD_PRESS : FN_PAD_RELEASE),
+           (uint32_t[]){ pad, mask }, 2);
+    if (getenv("A5_PAD_DEBUG"))
+        printf("[pad] %s mask=%#x pad=%#x pressed=%#x\n",
+               down ? "down" : "up", mask, pad, s_rd32(pad + 0x10));
+}
+#endif
+
 static void key_to_engine(int code, int down, const char* why) {
     uint32_t game = s_rd32(A5_BASE + ADDR_GAME);
     if (!game) return;
+#ifdef A5_DIRECT_PAD
+    if (code == 21 || code == 22 || code == 20 || code == 23) {
+        pad_key(code, down);
+        if (s_key_debug)
+            printf("[input] %-11s mask-key=%2d %s\n", why, code, down ? "down" : "up");
+        return;
+    }
+#endif
     // The engine follows Android's KeyEvent action convention: 0 = down,
     // 1 = up.  Passing the opposite silently drops every press.
     uint32_t args[3] = { game, (uint32_t)code, (uint32_t)(down ? 0 : 1) };

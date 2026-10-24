@@ -162,6 +162,11 @@ derives the same information on the fly.
   online `GLXPlayerUser*` (`ldrd`), C++ `stlp_priv` throw helpers, and
   `CMatrix::Mult/PreMult/SetMult` (`vmsr` — these are replaced by the
   hand-written natives anyway). 5,270 functions are translated.
+* **Keyboard driving:** the 3.3.7 build's `Game::GetKeyMask` only maps Back,
+  Camera and Space; it returns 0 for the Android driving keys (19-23).  The
+  host therefore injects the engine's own GamePad masks directly
+  (`1` left, `2` right, `4` brake, `0x4000` nitro) instead of going through
+  `Game::InputKeyBoard`.  `A5_PAD_DEBUG=1` shows the injected pad bits.
 * The Java installer/data manifest is different. The 3.3.7 profile uses its
   own 345-file manifest and its own PVRT URL; the first-run installer downloads
   and installs it. `--installed-data` still works. Note that this particular

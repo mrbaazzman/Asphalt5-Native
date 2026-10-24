@@ -192,6 +192,8 @@ def _profile_cmake(host: pathlib.Path, profile: dict) -> None:
         defs.append("A5_DEFAULT_PVRT=1")
     if profile.get("auto_start_click"):
         defs.append("A5_AUTO_START_CLICK=1")
+    if profile.get("direct_pad"):
+        defs.append("A5_DIRECT_PAD=1")
     ls = str(profile.get("logical_screen") or "").lower()
     if "x" in ls:
         lw, _, lh = ls.partition("x")
@@ -313,7 +315,8 @@ def prepare_dynamic_host(so: pathlib.Path, digest: str, work: pathlib.Path,
                          default_window: str = "",
                          data_manifest: str = "",
                          master_url_pvrt: str = "",
-                         master_url_atc: str = "") -> pathlib.Path:
+                         master_url_atc: str = "",
+                         direct_pad: bool = False) -> pathlib.Path:
     """Build a profile on the fly for an engine with no checked-in profile."""
     ref = pathlib.Path(ref_so)
     ref_digest = hashlib.sha256(ref.read_bytes()).hexdigest()
@@ -336,7 +339,8 @@ def prepare_dynamic_host(so: pathlib.Path, digest: str, work: pathlib.Path,
                                  default_window=default_window,
                                  data_manifest=data_manifest,
                                  master_url_pvrt=master_url_pvrt,
-                                 master_url_atc=master_url_atc)
+                                 master_url_atc=master_url_atc,
+                                 direct_pad=direct_pad)
     profile["_path"] = str(prof_path)
     return prepare_profile_host(profile, work)
 
@@ -561,6 +565,8 @@ def main() -> int:
                     help="unknown build: PVRT master URL from the APK installer")
     ap.add_argument("--master-url-atc", default="",
                     help="unknown build: ATC master URL from the APK installer")
+    ap.add_argument("--direct-pad", action="store_true",
+                    help="unknown build: driving keys inject GamePad masks")
     ap.add_argument("--label", default=None,
                     help="version label for the output folder/README")
     ap.add_argument("--force", action="store_true",
@@ -638,7 +644,8 @@ def main() -> int:
                                     default_window=args.default_window,
                                     data_manifest=args.data_manifest,
                                     master_url_pvrt=args.master_url_pvrt,
-                                    master_url_atc=args.master_url_atc)
+                                    master_url_atc=args.master_url_atc,
+                                    direct_pad=args.direct_pad)
         version_label = args.label or so_hash[:8]
         default_out = ROOT / "build" / ("Asphalt5-%s-native" % version_label)
 
