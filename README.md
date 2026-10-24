@@ -30,22 +30,22 @@ the exe.
 
 Download **`Asphalt5-Setup.exe`** from the GitHub **Releases** page and run it.
 It is a self-contained Windows executable: it embeds Python/Tkinter/Pillow and
-the prebuilt native host, so users do **not** need Python, CMake, Ninja, GCC,
+the prebuilt native hosts, so users do **not** need Python, CMake, Ninja, GCC,
 MinGW or any other build tools.
 
-1. Select your legally owned Asphalt 5 3.4.1 APK.
+1. Select your legally owned Asphalt 5 **3.4.1** or **3.3.7** APK.
 2. Choose an install folder and click **Install**.
 3. Launch the game.
 
-The setup reads the APK, strips the ARM instruction bytes and embeds the
-remaining engine data image inside `Asphalt5.exe`. The installed folder has
-**no `.so`, no APK files and no installer assets**. The game is a Windows GUI
-application, so it runs without a console window (diagnostics go to
-`%TEMP%\Asphalt5.log`).
+The setup reads the APK, detects the engine version, picks the matching native
+host, strips the ARM instruction bytes and embeds the remaining engine data
+image inside `Asphalt5.exe`. The installed folder has **no `.so`, no APK files
+and no installer assets**. The game is a Windows GUI application, so it runs
+without a console window (diagnostics go to `%TEMP%\Asphalt5.log`).
 
 The setup does **not** download game data. On first launch, the game's original
-Gameloft installer downloads the ~100 MB data pack and installs it into
-`sdcard\gameloft\games\asphalt5\` itself.
+Gameloft installer downloads the data pack (about 100–220 MB depending on the
+build) and installs it into `sdcard\gameloft\games\asphalt5\` itself.
 
 The release executable is supplied as a separate GitHub Release asset; it is
 not committed to this source repository. The source builder below is for

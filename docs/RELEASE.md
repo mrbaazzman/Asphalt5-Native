@@ -6,7 +6,7 @@
 PyInstaller. It embeds:
 
 - the Python runtime, Tkinter and Pillow (used only by the setup UI);
-- the prebuilt native `Asphalt5.exe` host.
+- the prebuilt native hosts for the **3.4.1** and **3.3.7** engines.
 
 It does **not** contain:
 
@@ -25,7 +25,7 @@ Windows GUI-subsystem executable: no console window opens; diagnostics go to
 Users need only:
 
 1. Windows 10/11 x64;
-2. their own Asphalt 5 **3.4.1** APK;
+2. their own Asphalt 5 **3.4.1** or **3.3.7** APK;
 3. internet access for the game's first-run data download.
 
 No Python, CMake, Ninja, GCC, MinGW, Visual Studio or other build tool is
@@ -37,15 +37,16 @@ required.
 2. Select the original APK and an install folder.
 3. Click **Install**. The setup:
    - reads `libasphalt5.so` from `lib/armeabi/`;
+   - detects the engine version from its SHA-256 and picks the matching host;
    - zeroes the ARM instruction bytes, keeping the data image;
    - embeds that data image inside `Asphalt5.exe`;
    - stages the original installer sprites in a cache outside the game folder;
    - copies the bundled GUI-subsystem native host.
 4. Launch the game (no console window). It runs at 1920×1080 physical pixels
    by default, DPI-aware and borderless on a 1080p display. The original
-   854×480 UI layout and level-0 textures are scaled to the render resolution
-   (`A5_TEXSCALE=auto`; 2.25× at 1080p). Use `A5_TEXSCALE=off` for original
-   texture resolution.
+   854×480 (3.4.1) or 1024×600 (3.3.7) UI layout and level-0 textures are
+   scaled to the render resolution (`A5_TEXSCALE=auto`). Use
+   `A5_TEXSCALE=off` for original texture resolution.
 5. On first launch the **game's own installer** automatically downloads the
    data pack from Gameloft and writes it to
    `sdcard\gameloft\games\asphalt5\`.
@@ -58,13 +59,26 @@ installer's automatic-start mode.
 
 Prerequisites:
 
-- a built host at `dist/Asphalt5.exe` (or `port/a5host/a5host.exe`);
+- a built GUI host for **3.4.1** at `port/a5host/a5host_gui.exe`;
+- a built GUI host for **3.3.7** at `build/a5host_<sha8>/a5host_gui.exe`
+  (created by `build_from_apk.py` when it builds the 3.3.7 profile);
 - Python 3.10+ with the repo dependencies and PyInstaller:
+
+Build or refresh both hosts first:
+
+```bat
+port\a5host\build_gui.bat
+python build_from_apk.py "path\to\Asphalt 5 HD 3.3.7.apk"
+```
+
+Then build the setup (it embeds both hosts and selects one from the APK):
 
 ```bat
 python -m pip install -r requirements.txt
 python scripts\make_release_installer.py
 ```
+
+Use `--host-341 PATH` / `--host-337 PATH` if the hosts are somewhere else.
 
 Outputs:
 
@@ -128,15 +142,16 @@ the source tree.
 
 | Symptom | Cause / fix |
 |---|---|
-| “unsupported engine build” | The APK is not the known 3.4.1 `armeabi` engine. Use the original APK. |
+| “unsupported engine build” | The APK is not a known 3.4.1 or 3.3.7 `armeabi` engine. Use an original APK. |
 | setup exits with no output | Windowed build: inspect `%TEMP%\Asphalt5-Setup-error.txt`; paths with spaces must be quoted when invoking `--apk`. |
 | game says data download failed | The game's first-run installer could not reach Gameloft. Keep the window open, check the connection/firewall, or build from source with `--packs` / `--installed-data`. |
 | antivirus/SmartScreen warns about the setup | One-file PyInstaller executables are sometimes flagged heuristically, and the build is unsigned. Publish the SHA-256, choose “More info → Run anyway” if you trust the build, or build from source. |
 
 ## Legal note
 
-The release contains a prebuilt native host produced from the game engine.
-That host is a derivative work of the game. Keep the release for users who
-legally own the APK; do not redistribute the installed game folder, the APK,
-the embedded engine data, or the downloaded data. The MIT license covers only
-the original host/tool code, not Asphalt 5 or its content. See `NOTICE.md`.
+The release contains prebuilt native hosts produced from the 3.4.1 and 3.3.7
+game engines. Those hosts are derivative works of the game. Keep the release
+for users who legally own the APK; do not redistribute the installed game
+folder, the APK, the embedded engine data, or the downloaded data. The MIT
+license covers only the original host/tool code, not Asphalt 5 or its content.
+See `NOTICE.md`.

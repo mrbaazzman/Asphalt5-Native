@@ -2,7 +2,7 @@
 """Asphalt 5 native installer for end users.
 
 The setup only does local installation:
-  - reads the user's original Asphalt 5 3.4.1 APK
+  - reads the user's original Asphalt 5 3.4.1 or 3.3.7 APK
   - strips the ARM instruction bytes from the engine image
   - embeds the remaining data image inside the prebuilt native host
   - stages the original installer UI assets outside the game folder
@@ -35,11 +35,25 @@ import zipfile
 from strip_engine import strip_engine
 
 APP_NAME = "Asphalt 5 Native"
-APP_VERSION = "1.2"
-EXPECTED_SO_SHA256 = "2966c986c73e71e7d2fa791a2f3a371749c7db183d7c40ff6641a57f01b78206"
+APP_VERSION = "1.4"
 SO_ENTRY = "lib/armeabi/libasphalt5.so"
 ASSET_NAMES = ("gameloft_logo", "interface_menu", "font_menu")
 HOST_NAME = "Asphalt5.exe"
+
+# The translated host is address-specific, so the setup carries one prebuilt
+# host per supported engine build and picks it from the APK's .so hash.
+ENGINE_VERSIONS = {
+    "3.4.1": {
+        "sha256": "2966c986c73e71e7d2fa791a2f3a371749c7db183d7c40ff6641a57f01b78206",
+        "host": "Asphalt5-341.exe",
+        "datalink": True,       # 3.4.1 reads data URLs from res/raw/datalink.txt
+    },
+    "3.3.7": {
+        "sha256": "c4c4a804ccbc827f709c09b998a19b56984f02718f438da2138858fbbfdc5d5d",
+        "host": "Asphalt5-337.exe",
+        "datalink": False,      # 3.3.7 has its PVRT URL baked into the APK's installer
+    },
+}
 
 
 class InstallError(RuntimeError):
@@ -64,30 +78,36 @@ def repo_root() -> pathlib.Path:
     return pathlib.Path(__file__).resolve().parents[1]
 
 
-def find_host(explicit: str | None = None) -> pathlib.Path:
+def find_host(version: str, explicit: str | None = None) -> pathlib.Path:
+    info = ENGINE_VERSIONS[version]
     candidates: list[pathlib.Path] = []
     if explicit:
         candidates.append(pathlib.Path(explicit).expanduser())
     fd = frozen_dir()
     if fd is not None:
-        candidates.append(fd / HOST_NAME)
+        candidates.append(fd / info["host"])
     else:
         here = pathlib.Path(__file__).resolve()
+        root = here.parent.parent
         candidates += [
-            here.parent / HOST_NAME,
-            here.parent.parent / "release_payload" / HOST_NAME,
-            here.parent.parent / "dist" / HOST_NAME,
-            here.parent.parent / "port" / "a5host" / "a5host_gui.exe",
-            here.parent.parent / "port" / "a5host" / "a5host.exe",
+            root / "release_payload" / info["host"],
+            root / "build" / ("a5host_" + info["sha256"][:8]) / "a5host_gui.exe",
         ]
+        if version == "3.4.1":
+            candidates.append(root / "port" / "a5host" / "a5host_gui.exe")
     for p in candidates:
         if p.is_file():
             return p.resolve()
-    raise InstallError("native host (Asphalt5.exe) not found next to the setup")
+    raise InstallError(
+        "native host for Asphalt 5 %s (%s) not found.\n\n"
+        "Build that host first (see docs/RELEASE.md), or pass --host "
+        "for a test install." % (version, info["host"]))
 
 
 def default_apk() -> str:
-    names = ("Asphalt 5 3.4.1.apk", "Asphalt5 3.4.1.apk", "Asphalt 5.apk")
+    names = ("Asphalt 5 3.4.1.apk", "Asphalt5 3.4.1.apk",
+             "Asphalt 5 HD 3.3.7.apk", "Asphalt5 3.3.7.apk",
+             "Asphalt 5.apk")
     homes = [pathlib.Path.cwd(), pathlib.Path.home() / "Downloads",
              pathlib.Path.home() / "Desktop"]
     if getattr(sys, "frozen", False):
@@ -111,7 +131,7 @@ def assets_cache_dir() -> pathlib.Path:
 
 
 def extract_apk(apk: pathlib.Path, assets_dir: pathlib.Path,
-                allow_unknown: bool, log) -> tuple[str, bytes]:
+                allow_unknown: bool, log) -> tuple[str, str, bytes]:
     if not apk.is_file():
         raise InstallError("APK not found: %s" % apk)
     try:
@@ -125,13 +145,26 @@ def extract_apk(apk: pathlib.Path, assets_dir: pathlib.Path,
         so = z.read(SO_ENTRY)
         digest = hashlib.sha256(so).hexdigest()
         log("engine: %d bytes (original), sha256 %s" % (len(so), digest))
-        if digest.lower() != EXPECTED_SO_SHA256 and not allow_unknown:
-            raise InstallError(
-                "unsupported engine build.\n\n"
-                "Expected Asphalt 5 3.4.1 sha256:\n%s\n\n"
-                "This APK has:\n%s\n\n"
-                "Use the original 3.4.1 APK, or pass --allow-unknown at your own risk."
-                % (EXPECTED_SO_SHA256, digest))
+
+        version = None
+        for label, info in ENGINE_VERSIONS.items():
+            if digest.lower() == info["sha256"]:
+                version = label
+                break
+        if version is None:
+            if not allow_unknown:
+                expected = "\n".join(
+                    "  %s  %s" % (label, info["sha256"])
+                    for label, info in ENGINE_VERSIONS.items())
+                raise InstallError(
+                    "unsupported engine build.\n\n"
+                    "Supported Asphalt 5 engines:\n%s\n\n"
+                    "This APK has:\n  %s\n\n"
+                    "Use an original 3.4.1 or 3.3.7 APK, or pass "
+                    "--allow-unknown at your own risk." % (expected, digest))
+            version = "3.4.1"
+            log("WARNING: unknown engine build; using the 3.4.1 host "
+                "at your own risk")
 
         # The ARM code is already translated; keep only the engine data
         # (strings/globals/vtables/literal pools) and zero the instruction
@@ -166,26 +199,39 @@ def extract_apk(apk: pathlib.Path, assets_dir: pathlib.Path,
                 "%d %d\n" % im.size, encoding="ascii")
             log("installer asset: %s (%dx%d)" % (name, im.size[0], im.size[1]))
 
+        need_datalink = ENGINE_VERSIONS[version]["datalink"]
         for raw in ("datalink.txt", "serialkey.txt"):
+            if raw == "datalink.txt" and not need_datalink:
+                # 3.3.7 carries its PVRT URL in the compiled installer; drop a
+                # stale 3.4.1 datalink so the shared asset cache stays honest.
+                try:
+                    (assets / raw).unlink()
+                except FileNotFoundError:
+                    pass
+                continue
             entry = "res/raw/" + raw
             if entry not in names:
                 raise InstallError("APK is missing %s" % entry)
             (assets / raw).write_bytes(z.read(entry))
-    return digest, image
+    return version, digest, image
 
 
-def write_readme(out: pathlib.Path) -> None:
+def write_readme(out: pathlib.Path, version: str) -> None:
+    layout = "1024x600" if version == "3.3.7" else "854x480"
     text = """ASPHALT 5 - native x86-64 PC version
 ====================================
 
+VERSION
+  Installed from your original Asphalt 5 %s APK.
+
 RUN
   Double-click Asphalt5.exe.  It is a Windows GUI application; no console
-  window appears.  Diagnostics go to %TEMP%\\Asphalt5.log.
+  window appears.  Diagnostics go to %%TEMP%%\\Asphalt5.log.
 
 FIRST LAUNCH - GAME DATA
   The original Gameloft installer is included.  On the first launch it
-  automatically downloads the additional game data (about 100 MB) from
-  Gameloft's servers and installs it into:
+  automatically downloads the additional game data (about 100-220 MB
+  depending on the build) from Gameloft's servers and installs it into:
 
       sdcard\\gameloft\\games\\asphalt5\\
 
@@ -196,11 +242,11 @@ FIRST LAUNCH - GAME DATA
 
 DISPLAY
   Runs at 1920x1080 physical pixels by default (DPI-aware, borderless when
-  the window fills the display).  The original 854x480 UI layout is scaled
+  the window fills the display).  The original %s UI layout is scaled
   to the render resolution; 3D is rasterized at the window size.
   A5_WINDOW=1600x900   run at another resolution
   A5_WINDOWED=1        force a normal bordered window
-  A5_SCREEN=854x480    override the logical UI layout (advanced)
+  A5_SCREEN=%s    override the logical UI layout (advanced)
   A5_TEXSCALE=auto     texture density (default follows render scale)
   A5_TEXSCALE=off      keep original texture resolution
   A5_ASPECT=fit        preserve 16:9 with black bars (default)
@@ -226,7 +272,7 @@ LEGAL
   Unofficial port; not affiliated with Gameloft.  Asphalt 5 and its content
   remain the property of their owners.  Do not redistribute this folder or
   the game data.  You must own the original APK.
-"""
+""" % (version, layout, layout)
     (out / "README.txt").write_text(text, encoding="utf-8", newline="\r\n")
 
 
@@ -243,18 +289,19 @@ def install(apk: str, out: str, host: str | None = None,
             allow_unknown: bool = False, log=print) -> pathlib.Path:
     apk_p = pathlib.Path(apk).expanduser().resolve()
     out_p = pathlib.Path(out).expanduser().resolve()
-    host_p = find_host(host)
     if out_p.exists() and not out_p.is_dir():
         raise InstallError("install path is a file: %s" % out_p)
     out_p.mkdir(parents=True, exist_ok=True)
 
     log("APK:  %s" % apk_p)
     log("OUT:  %s" % out_p)
-    log("host: %s" % host_p)
 
     cache = assets_cache_dir()
     log("installer asset cache: %s" % cache)
-    so_hash, image = extract_apk(apk_p, cache, allow_unknown, log)
+    version, so_hash, image = extract_apk(apk_p, cache, allow_unknown, log)
+    host_p = find_host(version, host)
+    log("build: %s" % version)
+    log("host: %s" % host_p)
 
     dst_host = out_p / HOST_NAME
     if host_p != dst_host:
@@ -276,7 +323,7 @@ def install(apk: str, out: str, host: str | None = None,
             pass
 
     (out_p / "saves").mkdir(exist_ok=True)
-    write_readme(out_p)
+    write_readme(out_p, version)
     log("installed: %s" % out_p)
     log("engine data embedded in Asphalt5.exe; no .so or APK files in the folder")
     log("first launch will download game data through the original installer")
@@ -304,7 +351,7 @@ def gui_main(apk_default: str, out_default: str, host: str | None,
     from tkinter import filedialog, messagebox, ttk
 
     root = tk.Tk()
-    root.title("%s - installer" % APP_NAME)
+    root.title("%s %s - installer" % (APP_NAME, APP_VERSION))
     root.geometry("720x480")
     root.minsize(620, 420)
 
@@ -314,7 +361,7 @@ def gui_main(apk_default: str, out_default: str, host: str | None,
 
     apk_var = tk.StringVar(value=apk_default)
     out_var = tk.StringVar(value=out_default)
-    status_var = tk.StringVar(value="Select your original Asphalt 5 3.4.1 APK.")
+    status_var = tk.StringVar(value="Select your original Asphalt 5 3.4.1 or 3.3.7 APK.")
     progress = tk.IntVar(value=0)
     q: queue.Queue = queue.Queue()
     busy = {"value": False}
@@ -325,7 +372,7 @@ def gui_main(apk_default: str, out_default: str, host: str | None,
 
     def browse_apk() -> None:
         p = filedialog.askopenfilename(
-            title="Select Asphalt 5 3.4.1 APK",
+            title="Select Asphalt 5 APK (3.4.1 or 3.3.7)",
             filetypes=[("Android package", "*.apk"), ("All files", "*.*")])
         if p:
             apk_var.set(p)
@@ -429,7 +476,7 @@ def gui_main(apk_default: str, out_default: str, host: str | None,
         apk = apk_var.get().strip()
         out = out_var.get().strip()
         if not apk:
-            messagebox.showwarning("Missing APK", "Select the original Asphalt 5 3.4.1 APK.")
+            messagebox.showwarning("Missing APK", "Select the original Asphalt 5 3.4.1 or 3.3.7 APK.")
             return
         if not out:
             messagebox.showwarning("Missing folder", "Select an install folder.")
@@ -462,11 +509,11 @@ def gui_main(apk_default: str, out_default: str, host: str | None,
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--cli", action="store_true", help="run without the GUI")
-    ap.add_argument("--apk", default=None, help="original Asphalt 5 3.4.1 APK")
+    ap.add_argument("--apk", default=None, help="original Asphalt 5 3.4.1 or 3.3.7 APK")
     ap.add_argument("--out", default=None, help="install folder")
-    ap.add_argument("--host", default=None, help="overrides the bundled host (dev)")
+    ap.add_argument("--host", default=None, help="overrides the version-matched host (dev)")
     ap.add_argument("--allow-unknown", action="store_true",
-                    help="allow an engine hash other than 3.4.1")
+                    help="allow an engine hash other than the known 3.4.1/3.3.7 builds")
     ap.add_argument("--launch", action="store_true", help="launch after installing")
     args = ap.parse_args()
 
