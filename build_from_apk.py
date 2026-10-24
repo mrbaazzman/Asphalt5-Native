@@ -161,6 +161,12 @@ def _profile_cmake(host: pathlib.Path, profile: dict) -> None:
         if lw.strip().isdigit() and lh.strip().isdigit():
             defs.append("A5_DEFAULT_SCREEN_W=%s" % lw.strip())
             defs.append("A5_DEFAULT_SCREEN_H=%s" % lh.strip())
+    dw = str(profile.get("default_window") or "").lower()
+    if "x" in dw:
+        ww, _, wh = dw.partition("x")
+        if ww.strip().isdigit() and wh.strip().isdigit():
+            defs.append("A5_DEFAULT_WINDOW_W=%s" % ww.strip())
+            defs.append("A5_DEFAULT_WINDOW_H=%s" % wh.strip())
     if defs and marker in text:
         add = ["target_compile_definitions(a5host PRIVATE %s)" % d for d in defs
                if d.split('=')[0] not in text]
@@ -262,7 +268,8 @@ def prepare_dynamic_host(so: pathlib.Path, digest: str, work: pathlib.Path,
                          ref_so: pathlib.Path, tolerant_data: bool = False,
                          default_pvrt: bool = False,
                          auto_start_click: bool = False,
-                         logical_screen: str = "") -> pathlib.Path:
+                         logical_screen: str = "",
+                         default_window: str = "") -> pathlib.Path:
     """Build a profile on the fly for an engine with no checked-in profile."""
     ref = pathlib.Path(ref_so)
     ref_digest = hashlib.sha256(ref.read_bytes()).hexdigest()
@@ -281,7 +288,8 @@ def prepare_dynamic_host(so: pathlib.Path, digest: str, work: pathlib.Path,
                                  tolerant_data=tolerant_data,
                                  default_pvrt=default_pvrt,
                                  auto_start_click=auto_start_click,
-                                 logical_screen=logical_screen)
+                                 logical_screen=logical_screen,
+                                 default_window=default_window)
     profile["_path"] = str(prof_path)
     return prepare_profile_host(profile, work)
 
@@ -370,7 +378,8 @@ def copy_installed_data(src: pathlib.Path, out: pathlib.Path) -> None:
 
 
 def write_readme(out: pathlib.Path, data_mode: str, version: str = "3.4.1",
-                 legacy: bool = False, logical: str = "854x480") -> None:
+                 legacy: bool = False, logical: str = "854x480",
+                 window_note: str = "1920x1080 physical pixels") -> None:
     legacy_none = (
         "No game data is included.  This engine build has its own data layout;\n"
         "  the 3.4.x download pack is not known to be compatible.  Put a\n"
@@ -399,10 +408,9 @@ Engine: Asphalt 5 HD {version} (built from your APK)
 {first}
 
 DISPLAY
-  Default render size: 1920x1080 physical pixels (DPI-aware, borderless when
-  it fills the display; smaller desktops use the desktop size).  The original
-  {logical} UI layout is scaled to the render resolution; level-0 textures are
-  resampled to match.
+  Default render size: {window_note} (DPI-aware, borderless when it fills the
+  display).  The original {logical} UI layout is scaled to the render
+  resolution; level-0 textures are resampled to match.
   A5_WINDOW=1600x900   run at another resolution
   A5_WINDOWED=1        force a normal bordered window
   A5_TEXSCALE=auto     texture density (default follows render scale)
@@ -443,7 +451,7 @@ NOTES
     installed data or data packs.
 
 Built with the Asphalt 5 native pipeline (see README.md / docs/).
-""".format(first=first, version=version, logical=logical)
+""".format(first=first, version=version, logical=logical, window_note=window_note)
     (out / "README.txt").write_text(text, encoding="utf-8", newline="\r\n")
 
 
@@ -497,6 +505,8 @@ def main() -> int:
                     help="unknown build: splash waits for a tap (send two taps)")
     ap.add_argument("--logical-screen", default="",
                     help="unknown build: engine layout resolution, e.g. 1024x600")
+    ap.add_argument("--default-window", default="",
+                    help="unknown build: default window size, e.g. 1920x1080")
     ap.add_argument("--label", default=None,
                     help="version label for the output folder/README")
     ap.add_argument("--force", action="store_true",
@@ -570,7 +580,8 @@ def main() -> int:
                                     tolerant_data=args.tolerant_data,
                                     default_pvrt=args.default_pvrt,
                                     auto_start_click=args.auto_start_click,
-                                    logical_screen=args.logical_screen)
+                                    logical_screen=args.logical_screen,
+                                    default_window=args.default_window)
         version_label = args.label or so_hash[:8]
         default_out = ROOT / "build" / ("Asphalt5-%s-native" % version_label)
 
@@ -652,12 +663,22 @@ def main() -> int:
         "set A5_WINDOWED=1\r\n"
         "start \"\" \"%~dp0Asphalt5.exe\"\r\n"
         "endlocal\r\n", encoding="ascii", newline="")
+    (out / "Play fullscreen 1080p.bat").write_text(
+        "@echo off\r\n"
+        "setlocal\r\n"
+        "set A5_WINDOW=1920x1080\r\n"
+        "set A5_BORDERLESS=1\r\n"
+        "start \"\" \"%~dp0Asphalt5.exe\"\r\n"
+        "endlocal\r\n", encoding="ascii", newline="")
     logical = "854x480"
+    window_note = "1920x1080 physical pixels"
     if profile is not None:
         logical = profile.get("logical_screen") or logical
+        if profile.get("default_window"):
+            window_note = "%s borderless full screen" % profile["default_window"]
     write_readme(out, data_mode, version_label,
                  legacy=(so_hash.lower() != EXPECTED_SO_SHA256),
-                 logical=logical)
+                 logical=logical, window_note=window_note)
 
     total = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print("\nclean install: %s" % out)

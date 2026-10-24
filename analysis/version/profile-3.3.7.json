@@ -5744,5 +5744,6 @@
  "tolerant_data_check": true,
  "default_pvrt": true,
  "auto_start_click": true,
- "logical_screen": "1024x600"
+ "logical_screen": "1024x600",
+ "default_window": "1920x1080"
 }

@@ -26,6 +26,8 @@ resources (`AndroidResources_PVRT.zip` from the APK's `GameInstaller` URL,
   including the full right-hand SINGLE RACE / CAREER / OPTIONS / MULTI-PLAYER /
   QUIT column.  The 3.3.7 build is a **1024×600 tablet layout**; the old host
   default (854×480, the 3.4.1 phone layout) pushed that column off-screen.
+  The profile also defaults the window to **1920×1080 borderless full screen**;
+  `Play windowed.bat` (1280×720) is included for smaller desktops.
 * `GS_LoadGame` (Quick Race) starts; the race load is functional but slow in
   the O1 console build
 * audio effects that the engine requests as `raw_*.glsnd` from the Java
@@ -88,7 +90,7 @@ python analysis/tools/vermap.py genprofile ^
   analysis/version/profile-<version>.json ^
   --ref-so reference-3.4.1-libasphalt5.so ^
   --label <version> --tolerant-data --default-pvrt ^
-  --auto-start-click --logical-screen 1024x600
+  --auto-start-click --logical-screen 1024x600 --default-window 1920x1080
 
 :: 3. build it
 python build_from_apk.py "Asphalt 5 <version>.apk"

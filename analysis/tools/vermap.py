@@ -452,7 +452,7 @@ def rewrite_map(src_root, dst_root, address_map):
 
 def gen_profile(ref_snapshot, ref_so, target_so, src_root, list_path, out_path,
                 label="", tolerant_data=False, default_pvrt=False,
-                auto_start_click=False, logical_screen=""):
+                auto_start_click=False, logical_screen="", default_window=""):
     ref = Engine(ref_so)
     tgt = Engine(target_so)
     res = Resolver(ref_snapshot, tgt)
@@ -523,6 +523,7 @@ def gen_profile(ref_snapshot, ref_so, target_so, src_root, list_path, out_path,
         "default_pvrt": bool(default_pvrt),
         "auto_start_click": bool(auto_start_click),
         "logical_screen": logical_screen,
+        "default_window": default_window,
     }
     pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(out_path).write_text(json.dumps(profile, indent=1) + "\n",
@@ -707,6 +708,8 @@ def main(argv=None):
                    help="profile's splash waits for a tap (send two taps)")
     p.add_argument("--logical-screen", default="",
                    help="engine layout resolution, e.g. 1024x600")
+    p.add_argument("--default-window", default="",
+                   help="default render/window size, e.g. 1920x1080")
 
     a = ap.parse_args(argv)
     if a.cmd == "snapshot":
@@ -726,7 +729,7 @@ def main(argv=None):
     elif a.cmd == "genprofile":
         gen_profile(a.snapshot, a.ref_so, a.target_so, a.src, a.list, a.out,
                     a.label, a.tolerant_data, a.default_pvrt,
-                    a.auto_start_click, a.logical_screen)
+                    a.auto_start_click, a.logical_screen, a.default_window)
     return 0
 
 

@@ -1323,6 +1323,14 @@ int main(int argc, char** argv) {
     if (ss) sscanf(ss, "%dx%d", &scr_w, &scr_h);
     if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
     if (win_w <= 0 || win_h <= 0) {
+#ifdef A5_DEFAULT_WINDOW_W
+        // Profile default (the 3.3.7 tablet build runs at 1920x1080 full
+        // screen).  A5_WINDOW still overrides it.
+        win_w = A5_DEFAULT_WINDOW_W;
+        win_h = A5_DEFAULT_WINDOW_H;
+        SetEnvironmentVariableA("A5_BORDERLESS", "1");
+        SetEnvironmentVariableA("A5_WINDOWED", NULL);
+#else
         if (ss) {
             // backward-compatible diagnostic behaviour: A5_SCREEN alone
             // means the old "same logical and window size" test mode
@@ -1356,6 +1364,7 @@ int main(int argc, char** argv) {
                 if (dh > 0 && win_h > dh) win_h = dh;
             }
         }
+#endif
     }
     if (win_w < 320) win_w = 320;
     if (win_h < 200) win_h = 200;
