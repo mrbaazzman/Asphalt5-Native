@@ -5743,5 +5743,6 @@
  ],
  "tolerant_data_check": true,
  "default_pvrt": true,
- "auto_start_click": true
+ "auto_start_click": true,
+ "logical_screen": "1024x600"
 }

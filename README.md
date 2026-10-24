@@ -157,10 +157,13 @@ python build_from_apk.py "Asphalt 5 <version>.apk"
 `--default-pvrt` is for PVRTC tablet builds (3.3.7 already has it in its
 profile); `A5_ATC=1` forces the ATC texture path instead.
 
-**Verified for 3.3.7:** the port boots the engine, reaches the main menu with
-the car/UI/animated background, starts Quick Race and renders the race HUD and
-tutorial with the official Galaxy Tab PVRT resource pack. 5,270 functions are
-translated; no untranslated code is reached.
+**Verified for 3.3.7:** the port boots the engine, reaches the full 1024×600
+tablet main menu (car, UI, animated background and the right-hand
+SINGLE RACE / CAREER / OPTIONS / MULTI-PLAYER / QUIT column), starts Quick Race
+and renders the race HUD and tutorial with the official Galaxy Tab PVRT
+resource pack. 5,270 functions are translated; no untranslated code is reached.
+The profile sets the 1024×600 logical layout automatically (`A5_SCREEN`
+overrides it).
 
 See [`analysis/version/README.md`](analysis/version/README.md) for the mapping
 rules, the 3.3.7 differences (renamed Java package, `__android_log_write`, the
@@ -204,10 +207,12 @@ appears on its own. Set `A5_TEST_CLICK="frame:x:y;..."` to override the taps.
 
 ## Resolution
 
-The default render size is **1920×1080 physical pixels**. The process is
-DPI-aware, so Windows display scaling does not blur or virtualize the game.
-On a 1080p display the window is borderless; on smaller displays it caps to
-the desktop.
+The default render size is **1920×1080 physical pixels**, or the desktop size
+when the visible desktop is smaller (laptops, 125% scaled panels, remote
+sessions). The process is DPI-aware, so Windows display scaling does not blur
+or virtualize the game. On a 1080p display the window is borderless. If the
+window is still too large, run `Play windowed.bat` (1280×720 bordered) or set
+`A5_WINDOW=1280x720` and `A5_WINDOWED=1`.
 
 The engine's original **854×480 logical layout** is preserved and scaled to
 the render resolution. The GL bridge scales `glViewport`/`glScissor` and input

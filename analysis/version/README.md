@@ -9,7 +9,7 @@ addresses.
 | File | Purpose |
 |---|---|
 | `symbols-3.4.1.txt` | Reference symbol table (`address kind size mangled-name`). Interoperability metadata only: no code. Used to find the reference symbol that owns a host address. |
-| `profile-3.3.7.json` | Complete build profile for the 3.3.7 engine: engine sha256, the 432 host address remappings, 5,287 translated function addresses, postgen anchors, the tolerant data-check mode and the PVRT default. |
+| `profile-3.3.7.json` | Complete build profile for the 3.3.7 engine: engine sha256, the 432 host address remappings, 5,287 translated function addresses, postgen anchors, the tolerant data-check mode, the PVRT default, the 1024×600 logical layout and the splash auto-taps. |
 
 ## Verified 3.3.7 status
 
@@ -22,7 +22,10 @@ resources (`AndroidResources_PVRT.zip` from the APK's `GameInstaller` URL,
 * `GS_Splash` → `GS_TrailerMovie` → `GS_MainMenu` transitions: OK
   (the 3.3.7 splash waits for a tap; the profile defines `A5_AUTO_START_CLICK`,
   which sends two taps at frames 250/500 — override with `A5_TEST_CLICK`)
-* main menu renders the car, UI and animated background at 1024×600
+* main menu renders the car, UI and animated background at 1024×600,
+  including the full right-hand SINGLE RACE / CAREER / OPTIONS / MULTI-PLAYER /
+  QUIT column.  The 3.3.7 build is a **1024×600 tablet layout**; the old host
+  default (854×480, the 3.4.1 phone layout) pushed that column off-screen.
 * `GS_LoadGame` (Quick Race) starts; the race load is functional but slow in
   the O1 console build
 * audio effects that the engine requests as `raw_*.glsnd` from the Java
@@ -84,7 +87,8 @@ python analysis/tools/vermap.py genprofile ^
   port/a5host/src analysis/autogen/list.txt ^
   analysis/version/profile-<version>.json ^
   --ref-so reference-3.4.1-libasphalt5.so ^
-  --label <version> --tolerant-data --default-pvrt
+  --label <version> --tolerant-data --default-pvrt ^
+  --auto-start-click --logical-screen 1024x600
 
 :: 3. build it
 python build_from_apk.py "Asphalt 5 <version>.apk"
