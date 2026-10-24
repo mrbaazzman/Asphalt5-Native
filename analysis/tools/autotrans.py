@@ -39,9 +39,13 @@ BASE = 0x10000000   # the host maps the .so at BASE + vaddr (a5host.c) - the
 ALU_SET = {'add', 'sub', 'rsb', 'and', 'orr', 'eor', 'bic', 'mov', 'mvn',
            'mul', 'mla', 'lsl', 'lsr', 'asr', 'ror'}
 SHIFTS = {'lsl', 'lsr', 'asr', 'ror', 'rrx'}
-# PLT stubs of noreturn functions: the bytes after a call to these are dead
-# data (a literal pool), not code.  __stack_chk_fail = 0x5c5f8.
+# PLT stubs of noreturn functions.  The defaults are the 3.4.1 layout; the
+# actual addresses are derived from the input ELF in _ensure_elf(), so the
+# translator also works for other builds of the same engine.
 NORETURN_PLTS = {0x5c5f8, 0x5ca24}
+PLT_LO = 0x5C368
+PLT_HI = 0x5CB78
+_LAYOUT = None
 CONDS = {'eq', 'ne', 'cs', 'hs', 'cc', 'lo', 'mi', 'pl', 'vs', 'vc',
          'hi', 'ls', 'ge', 'lt', 'gt', 'le'}
 KNOWN_BASES = {
@@ -85,8 +89,42 @@ def split_cc(m):
     return m, None
 
 
+def _ensure_elf(elf):
+    """derive section/program-header layout and noreturn PLT stubs from the ELF"""
+    global _LAYOUT, PLT_LO, PLT_HI, NORETURN_PLTS
+    if _LAYOUT is not None and _LAYOUT['data'] is elf:
+        return
+    import io
+    from elftools.elf.elffile import ELFFile
+    with ELFFile(io.BytesIO(elf)) as e:
+        segs = [(int(p['p_offset']), int(p['p_vaddr']), int(p['p_filesz']))
+                for p in e.iter_segments() if p['p_type'] == 'PT_LOAD']
+        plt = e.get_section_by_name('.plt')
+        rel = e.get_section_by_name('.rel.plt')
+        dynsym = e.get_section_by_name('.dynsym')
+        noret = set()
+        if plt is not None and rel is not None and dynsym is not None:
+            base = int(plt['sh_addr'])
+            n = rel.num_relocations()
+            stub_size = (int(plt['sh_size']) - 20) // n if n else 0
+            if stub_size > 0:
+                for i, r in enumerate(rel.iter_relocations()):
+                    name = dynsym.get_symbol(r['r_info_sym']).name
+                    if name in ('__stack_chk_fail', 'exit'):
+                        noret.add(base + 20 + i * stub_size)
+            PLT_LO = base
+            PLT_HI = base + int(plt['sh_size'])
+        _LAYOUT = {'data': elf, 'segs': segs}
+        if noret:
+            NORETURN_PLTS = noret
+
+
 def foff(v):
-    return v - 0x1000 if v >= 0x1EE590 else v
+    if _LAYOUT is not None:
+        for off, vaddr, filesz in _LAYOUT['segs']:
+            if vaddr <= v < vaddr + filesz:
+                return off + (v - vaddr)
+    return v
 
 
 def split_ops(ops):
@@ -372,6 +410,7 @@ def rn(r):
 
 def translate(elf, addr, maxn=4000, native_set=None):
     """returns (list_of_c_lines, func_addr) or raises Refuse"""
+    _ensure_elf(elf)
     md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_ARM)
     md.detail = False
 
@@ -645,7 +684,7 @@ def translate(elf, addr, maxn=4000, native_set=None):
             continue
         if base == 'bl':
             tgt = int(ops[0].lstrip('#'), 16)
-            if 0x5c000 <= tgt < 0x5d000:
+            if PLT_LO <= tgt < PLT_HI:
                 # PLT stub -> resolve to the host shim and call it directly
                 # (no nested emulator instance; the shim sequence is compared
                 # by the differential via the shim call log)
@@ -1282,7 +1321,7 @@ def gen_function(elf, addr, name, maxn=4000, native_set=None):
     body, order, calls, has_fp = translate(elf, addr, maxn, native_set)
     ncalls = len(calls)
     nset = native_set or set()
-    all_direct = all(t in nset or (0x5c000 <= t < 0x5d000) for _, t in calls)
+    all_direct = all(t in nset or (PLT_LO <= t < PLT_HI) for _, t in calls)
     lines = []
     lines.append('// %s @ %#x (%d insns, %d calls%s%s)' % (name, addr, len(order), ncalls,
                  ', all direct' if all_direct else '', ', VFP' if has_fp else ''))

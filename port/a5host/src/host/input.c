@@ -448,6 +448,12 @@ static void mouse_frame(int frame) {
     {
         static int tc_n = -1, tc_f[16], tc_x[16], tc_y[16];
         const char* tc = getenv("A5_TEST_CLICK");
+#ifdef A5_AUTO_START_CLICK
+        // This engine's splash waits for a tap before advancing to the menu.
+        // Two taps after the intro movie/logo mimic the phone's "touch to
+        // continue"; A5_TEST_CLICK overrides the sequence.
+        if (!tc) tc = "250:427:240;500:427:240";
+#endif
         if (tc && tc_n < 0) {
             tc_n = 0;
             const char* p = tc;

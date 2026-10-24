@@ -370,7 +370,7 @@ void rec_add(uint32_t a, int sz, uint32_t by, uint32_t pc) {
 }
 // ---------------------------------------------------------------- shims
 enum {
-    SH_NONE = 0, SH_LOG, SH_MALLOC, SH_CALLOC, SH_REALLOC, SH_FREE, SH_NEWARR,
+    SH_NONE = 0, SH_LOG, SH_LOG_WRITE, SH_MALLOC, SH_CALLOC, SH_REALLOC, SH_FREE, SH_NEWARR,
     SH_MEMCPY, SH_MEMMOVE, SH_MEMSET, SH_MEMCMP, SH_MEMCHR,
     SH_STRLEN, SH_STRCMP, SH_STRCASECMP, SH_STRNCMP, SH_STRCPY, SH_STRNCPY, SH_STRLCPY,
     SH_STRCAT, SH_STRCHR, SH_STRRCHR, SH_STRSTR, SH_STRTOL, SH_STRTOD, SH_ATOI,
@@ -392,6 +392,7 @@ enum {
 
 static const struct { const char* name; int id; } SHIM_TABLE[] = {
     {"__android_log_print", SH_LOG},
+    {"__android_log_write", SH_LOG_WRITE},
     {"malloc", SH_MALLOC}, {"calloc", SH_CALLOC}, {"realloc", SH_REALLOC}, {"free", SH_FREE},
     {"_Znaj", SH_NEWARR}, {"_Znwj", SH_MALLOC},
     {"memcpy", SH_MEMCPY}, {"memmove", SH_MEMMOVE}, {"memset", SH_MEMSET},
@@ -1227,6 +1228,9 @@ int main(int argc, char** argv) {
         }
     }
     SetConsoleOutputCP(65001);
+    // Unbuffered stdout: diagnostic lines must survive a kill/crash and be
+    // visible in real time when the engine is stuck in a long native call.
+    setvbuf(stdout, NULL, _IONBF, 0);
     AddVectoredExceptionHandler(1, veh_handler);
     g_exe_base = (unsigned long long)(uintptr_t)GetModuleHandleA(NULL);
     // single instance: a double-click that fires twice (or a lingering window)
@@ -1287,6 +1291,11 @@ int main(int argc, char** argv) {
     // build uses <exe>\..\..\data\unpacked_atc. The one that exists wins, with
     // the dist path preferred when neither exists (first run in dist).
     int use_atc = getenv("A5_PVRT") == NULL;
+#ifdef A5_DEFAULT_PVRT
+    // This engine build ships a PVRT data pack (e.g. the 3.3.7 tablet build);
+    // A5_ATC=1 still forces the ATC path, A5_PVRT=1 is the explicit PVRT flag.
+    if (!getenv("A5_PVRT") && !getenv("A5_ATC")) use_atc = 0;
+#endif
     if (!gd) {
         char distdir[512] = {0}, devdir[512] = {0};
         exe_dir_path("sdcard\\gameloft\\games\\asphalt5", distdir, sizeof(distdir));
@@ -1749,16 +1758,35 @@ int main(int argc, char** argv) {
         int force = getenv("A5_INSTALL") != NULL;
         int skip = getenv("A5_INSTALL_SKIP") != NULL;
         if (!skip && (force || a5install_data_incomplete(game_dir))) {
+#ifdef A5_TOLERANT_DATA
+            // Legacy builds use their own data manifest; the 3.4.x installer
+            // pack is not a safe fallback.  Explain what is missing instead of
+            // downloading a mismatched pack.  A5_INSTALL=1 still forces it.
+            if (!force) {
+                char msg[1200];
+                snprintf(msg, sizeof(msg),
+                         "No compatible game data was found in:\n%s\n\n"
+                         "Copy the data folder for this engine version there, or "
+                         "rebuild with --installed-data pointing at it.\n\n"
+                         "(Set A5_INSTALL=1 to run the legacy downloader anyway.)",
+                         game_dir);
+                printf("[host] %s\n", msg);
+                fflush(stdout);
+                MessageBoxA(NULL, msg, "Asphalt 5 - data required",
+                            MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+#endif
             char master[MAX_PATH + 64];
             // dist layout first (<exe>\data\packs), then the dev layout
-            const char* pack = getenv("A5_PVRT") ?
-                "data\\packs\\Asphalt5_Android_FULL_PVRT_342.zip" :
-                "data\\packs\\Asphalt5_Android_FULL_ATC_342.zip";
+            const char* pack = use_atc ?
+                "data\\packs\\Asphalt5_Android_FULL_ATC_342.zip" :
+                "data\\packs\\Asphalt5_Android_FULL_PVRT_342.zip";
             exe_relative_path(pack, master, sizeof(master));
             if (GetFileAttributesA(master) == INVALID_FILE_ATTRIBUTES) {
-                const char* devpack = getenv("A5_PVRT") ?
-                    "..\\..\\data\\packs\\Asphalt5_Android_FULL_PVRT_342.zip" :
-                    "..\\..\\data\\packs\\Asphalt5_Android_FULL_ATC_342.zip";
+                const char* devpack = use_atc ?
+                    "..\\..\\data\\packs\\Asphalt5_Android_FULL_ATC_342.zip" :
+                    "..\\..\\data\\packs\\Asphalt5_Android_FULL_PVRT_342.zip";
                 exe_relative_path(devpack, master, sizeof(master));
             }
             if (!a5install_run(game_dir, master, scr_w, scr_h)) return 0;

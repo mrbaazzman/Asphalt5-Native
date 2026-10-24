@@ -100,6 +100,13 @@ static uint32_t shim_call(int id, const char* name, uint32_t r0, uint32_t r1, ui
         printf("[%s] %s\n", tag, msg);
         return 0;
     }
+    case SH_LOG_WRITE: {
+        // __android_log_write(prio, tag, text): text is already formatted
+        char tag[128], msg[2048];
+        rstr(r1, tag, sizeof(tag)); rstr(r2, msg, sizeof(msg));
+        printf("[%s] %s\n", tag, msg);
+        return 0;
+    }
     case SH_MALLOC: case SH_NEWARR: return heap_alloc(r0);
     case SH_CALLOC: {
         uint32_t n = r0 * r1;

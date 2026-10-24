@@ -2,24 +2,56 @@
 
 Run after every `autotrans.py --gen`:
 
-    python analysis/tools/autotrans.py --gen <elf> analysis/autogen/list.txt \
-        port/a5host/src/host/autogens.inc
+    python analysis/tools/autotrans.py --gen <elf> <list.txt> \
+        <host>/src/host/autogens.inc
     python analysis/tools/postgen.py
 
 Patches:
   1. native-coverage counter at the top of auto_dispatch
-  2. content-hash output cache around the LZMA decode case (0x14690c)
-  3. direct calls to the LZMA inner helpers inside auto_14690c
+  2. content-hash output cache around the LZMA decode case
+  3. direct calls to the LZMA inner helpers inside auto_<decompress>
      (removes probe_dispatch/auto_enabled from the per-pixel path)
   4. Scene::UpdateCars native entries run the same tick/latch entry work as
      the emulated entry (a5_updatecars_entry)
 
+The anchor addresses come from the engine build.  Set A5_ANCHORS to a JSON
+file produced by `vermap.py anchors` to patch another build of the engine;
+without it the original 3.4.1 addresses are used.
+
 The script is idempotent: running it twice changes nothing.
 """
 import io
+import json
+import os
+import re
 import sys
 
 P = sys.argv[1] if len(sys.argv) > 1 else 'port/a5host/src/host/autogens.inc'
+
+DEFAULTS = {
+    "decompress": 0x14690C,
+    "helper_twiddle": 0x146898,
+    "helper_interp": 0x146528,
+    "helper_modulation": 0x14670C,
+    "updatecars": 0x9EF18,
+    "updatekeys": 0x178FDC,
+    "main_game": 0x1FA798,
+    "car_tick": 0x9F1E4,
+}
+
+A = dict(DEFAULTS)
+if os.environ.get('A5_ANCHORS'):
+    with open(os.environ['A5_ANCHORS'], encoding='utf-8') as f:
+        A.update(json.load(f))
+
+DEC = A['decompress']
+UPD = A['updatecars']
+UPD_LABEL = A['car_tick']
+KEYS = A['updatekeys']
+MAIN = A['main_game']
+HELPERS = ['0x%x' % A['helper_twiddle'],
+           '0x%x' % A['helper_interp'],
+           '0x%x' % A['helper_modulation']]
 
 REPORT_NEEDLE = (
     'static int auto_dispatch(uint32_t a, uint32_t* R, float* S, uint32_t sp) {\n'
@@ -31,8 +63,8 @@ REPORT_REPL = (
     '    switch (a - BASE) {'
 )
 
-CACHE_NEEDLE = '    case 0x14690c: return auto_14690c(R, S, sp);'
-CACHE_BLOCK = r'''    case 0x14690c: {
+CACHE_NEEDLE = '    case 0x%x: return auto_%x(R, S, sp);' % (DEC, DEC)
+CACHE_BLOCK = r'''    case 0x%x: {
         // Engine PVRTC mip decoder (src, bpp, w, h, flag, dst).  It is exact
         // but expensive; the same mips are decoded again on later races.
         // Cache its own output by compressed-content hash: a repeat is a
@@ -60,7 +92,7 @@ CACHE_BLOCK = r'''    case 0x14690c: {
                         R[3] = pc[i].r3; R[12] = pc[i].r12; R[14] = pc[i].r14;
                         return 1;
                     }
-                int rr = auto_14690c(R, S, sp);
+                int rr = auto_%x(R, S, sp);
                 size_t n = (size_t)w * h * 4;
                 if (pcn < 256 && pcb + (long long)n < (128LL << 20)) {
                     uint8_t* cp = (uint8_t*)malloc(n);
@@ -76,19 +108,18 @@ CACHE_BLOCK = r'''    case 0x14690c: {
                 return rr;
             }
         }
-        return auto_14690c(R, S, sp);
-    }'''
+        return auto_%x(R, S, sp);
+    }''' % (DEC, DEC, DEC)
 
-TICK_NEEDLE = '    case 0x9ef18: return auto_9ef18(R, S, sp);'
-TICK_REPL = '    case 0x9ef18: a5_updatecars_entry(); return auto_9ef18(R, S, sp);'
+TICK_NEEDLE = '    case 0x%x: return auto_%x(R, S, sp);' % (UPD, UPD)
+TICK_REPL = '    case 0x%x: a5_updatecars_entry(); return auto_%x(R, S, sp);' % (UPD, UPD)
 
-LATCH_NEEDLE = '    case 0x178fdc: return auto_178fdc(R, S, sp);'
+LATCH_NEEDLE = '    case 0x%x: return auto_%x(R, S, sp);' % (KEYS, KEYS)
 LATCH_REPL = (
-    '    case 0x178fdc: { uint32_t _pmgr = R[0]; int _pr = auto_178fdc(R, S, sp);\n'
-    '        a5_press_latch_update(rd32(BASE + 0x1fa798), _pmgr); return _pr; }'
+    '    case 0x%x: { uint32_t _pmgr = R[0]; int _pr = auto_%x(R, S, sp);\n'
+    '        a5_press_latch_update(rd32(BASE + %#x), _pmgr); return _pr; }'
+    % (KEYS, KEYS, MAIN)
 )
-
-HELPERS = ['0x146898', '0x146528', '0x14670c']
 
 
 def patch_updatecars_latch(s):
@@ -97,22 +128,23 @@ def patch_updatecars_latch(s):
     if LATCH_NEEDLE in s:
         s = s.replace(LATCH_NEEDLE, LATCH_REPL, 1)
         n += 1
-    start = s.find('static int auto_9ef18(uint32_t* R, float* S, uint32_t sp_entry) {')
+    start = s.find('static int auto_%x(uint32_t* R, float* S, uint32_t sp_entry) {' % UPD)
     if start >= 0:
         end = s.find('static int auto_', start + 30)
         if end < 0:
             end = len(s)
         seg = s[start:end]
-        if 'L_9f1e4:;' in seg and 'g_press_latch = 0;' not in seg:
-            seg = seg.replace('  L_9f1e4:;\n',
-                              '  L_9f1e4:;\n    g_press_latch = 0;   // car tick consumed the pressed edge\n', 1)
+        label = 'L_%x:;' % UPD_LABEL
+        if label in seg and 'g_press_latch = 0;' not in seg:
+            seg = seg.replace(label + '\n',
+                              label + '\n    g_press_latch = 0;   // car tick consumed the pressed edge\n', 1)
             s = s[:start] + seg + s[end:]
             n += 1
     return s, n
 
 
 def patch_direct_helpers(s):
-    start = s.find('static int auto_14690c(uint32_t* R, float* S, uint32_t sp_entry) {')
+    start = s.find('static int auto_%x(uint32_t* R, float* S, uint32_t sp_entry) {' % DEC)
     if start < 0:
         return s, 0
     end = s.find('static int auto_', start + 20)
@@ -152,6 +184,9 @@ def patch_direct_helpers(s):
 
 def main():
     s = io.open(P, encoding='utf-8', errors='ignore').read()
+    if not re.search(r'static int auto_[0-9a-f]+\(uint32_t\* R', s):
+        print('postgen: no translation functions (already split) - nothing to do')
+        return 0
     changed = 0
 
     if REPORT_NEEDLE in s:
@@ -164,21 +199,21 @@ def main():
     if CACHE_NEEDLE in s:
         s = s.replace(CACHE_NEEDLE, CACHE_BLOCK, 1)
         changed += 1
-    elif 'case 0x14690c: {' not in s:
+    elif 'case 0x%x: {' % DEC not in s:
         print('postgen: ERROR LZMA cache anchor missing', file=sys.stderr)
         return 1
 
     if TICK_NEEDLE in s:
         s = s.replace(TICK_NEEDLE, TICK_REPL, 1)
         changed += 1
-    elif 'case 0x9ef18: a5_updatecars_entry();' not in s:
+    elif 'case 0x%x: a5_updatecars_entry();' % UPD not in s:
         print('postgen: ERROR UpdateCars tick anchor missing', file=sys.stderr)
         return 1
 
     s, nl = patch_updatecars_latch(s)
     if nl:
         changed += nl
-    elif ('case 0x178fdc: return auto_178fdc' in s or
+    elif ('case 0x%x: return auto_%x' % (KEYS, KEYS) in s or
           'g_press_latch = 0;   // car tick consumed' not in s):
         print('postgen: ERROR UpdateCars latch anchors missing', file=sys.stderr)
         return 1
@@ -186,7 +221,7 @@ def main():
     s, nh = patch_direct_helpers(s)
     if nh:
         changed += nh
-    elif 'auto_146898(_R, S, sp);' not in s:
+    elif 'auto_%x(_R, S, sp);' % A['helper_twiddle'] not in s:
         print('postgen: ERROR direct-helper anchor missing', file=sys.stderr)
         return 1
 

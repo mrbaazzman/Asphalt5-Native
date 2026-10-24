@@ -92,11 +92,22 @@ def extract(apk_path: pathlib.Path | str, out_dir: pathlib.Path | str) -> pathli
 
         for raw in ("datalink.txt", "serialkey.txt"):
             entry = "res/raw/" + raw
-            if entry not in names:
-                raise SystemExit("APK missing %s" % entry)
-            (out_dir / raw).write_bytes(z.read(entry))
-        print("datalink.txt:", z.read("res/raw/datalink.txt")
-              .decode("utf-8", "replace")[:120], "...")
+            if entry in names:
+                (out_dir / raw).write_bytes(z.read(entry))
+                continue
+            # Older builds (e.g. 3.3.7) have no datalink.txt and ship an empty
+            # serialkey.txt.  The native installer keeps working; without a
+            # datalink it falls back to the local data folder/pack.
+            if raw == "datalink.txt" and (out_dir / raw).exists():
+                print("datalink.txt: not in APK, keeping existing file")
+            else:
+                (out_dir / raw).write_bytes(b"")
+                print("datalink.txt: not in APK, wrote empty placeholder"
+                      if raw == "datalink.txt" else
+                      "serialkey.txt: not in APK, wrote empty placeholder")
+        if "res/raw/datalink.txt" in names:
+            print("datalink.txt:", z.read("res/raw/datalink.txt")
+                  .decode("utf-8", "replace")[:120], "...")
 
     _write_font_map(out_dir)
     print("installer assets written to", out_dir)

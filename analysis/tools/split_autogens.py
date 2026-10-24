@@ -4,21 +4,24 @@ Run AFTER autotrans.py --gen and postgen.py:
 
     python analysis/tools/split_autogens.py
 
-Outputs:
-  port/a5host/src/host/autogen_api.h       (shared helpers + prototypes)
-  port/a5host/src/host/autogen_part_00.c .._11.c
-  port/a5host/src/host/autogens.inc        (dispatch + tables only)
+Outputs (under $A5_HOST, default port/a5host):
+  src/host/autogen_api.h       (shared helpers + prototypes)
+  src/host/autogen_part_00.c .._11.c
+  src/host/autogens.inc        (dispatch + tables only)
 
 The generated functions become non-static; the header declares them for the
 dispatch table and for cross-function calls.
 """
 import io
 import os
+import pathlib
 import re
 
-SRC = 'port/a5host/src/host/autogens.inc'
-HDR = 'port/a5host/src/host/autogen_api.h'
-TEMPLATE = 'analysis/tools/autogen_api_template.h'
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+HOST = pathlib.Path(os.environ.get('A5_HOST', ROOT / 'port' / 'a5host'))
+SRC = HOST / 'src' / 'host' / 'autogens.inc'
+HDR = HOST / 'src' / 'host' / 'autogen_api.h'
+TEMPLATE = ROOT / 'analysis' / 'tools' / 'autogen_api_template.h'
 NCHUNKS = 12
 
 lines = io.open(SRC, encoding='utf-8', errors='ignore').read().splitlines(True)
@@ -66,7 +69,7 @@ io.open(HDR, 'w', encoding='utf-8', newline='').write(hdr)
 
 # chunks
 for k in range(NCHUNKS):
-    path = 'port/a5host/src/host/autogen_part_%02d.c' % k
+    path = HOST / 'src' / 'host' / ('autogen_part_%02d.c' % k)
     with io.open(path, 'w', encoding='utf-8', newline='') as f:
         f.write('// generated chunk %d/%d - see analysis/tools/split_autogens.py\n' % (k, NCHUNKS))
         f.write('#include "autogen_api.h"\n\n')

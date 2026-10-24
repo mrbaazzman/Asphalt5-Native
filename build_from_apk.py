@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Build a clean native PC installation of Asphalt 5 3.4.1 from your APK.
+"""Build a clean native PC installation of Asphalt 5 from your APK.
 
 The builder:
-  1. reads your legally owned Asphalt 5 3.4.1 APK;
+  1. reads your legally owned APK and identifies the engine build;
   2. strips the ARM code and keeps only the engine data image;
-  3. generates the x86-64 translations from the engine binary;
+  3. maps the host's engine addresses to this build (via a checked-in version
+     profile, or on the fly from the 3.4.1 reference), then generates the
+     x86-64 translations from the engine binary;
   4. builds the native GUI-subsystem host (no console);
   5. embeds the data image in the exe and stages a clean install folder
      (exe, optional data packs / installed game data, saves, README).
@@ -15,8 +17,13 @@ only contains the engine + installer; the ~100 MB data packs are separate.
 Pass --packs or --installed-data to include data you already own, or leave
 them out and let the original installer fetch it on first run.
 
+Known engine builds (currently 3.4.1 and 3.3.7) build with no extra flags.
+Other builds need --allow-unknown and a 3.4.1 reference engine (see
+analysis/version/README.md).
+
 Examples:
     python build_from_apk.py "Asphalt 5 3.4.1.apk"
+    python build_from_apk.py "Asphalt 5 HD 3.3.7.apk"
     python build_from_apk.py "Asphalt 5 3.4.1.apk" --packs data\\packs
     python build_from_apk.py "Asphalt 5 3.4.1.apk" --installed-data ^
         "D:\\phone-backup\\sdcard\\gameloft\\games\\asphalt5"
@@ -26,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import pathlib
 import shutil
@@ -36,17 +44,22 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "analysis" / "tools"))
 from strip_engine import strip_engine  # noqa: E402
+import vermap  # noqa: E402
 TOOLS = ROOT / "analysis" / "tools"
 HOST = ROOT / "port" / "a5host"
 LIST = ROOT / "analysis" / "autogen" / "list.txt"
+VERSION_DIR = ROOT / "analysis" / "version"
+REF_SYMBOLS = VERSION_DIR / "symbols-3.4.1.txt"
 DEFAULT_APK = ROOT / "Asphalt 5 3.4.1.apk"
 DEFAULT_OUT = ROOT / "build" / "Asphalt5-3.4.1-native"
 
-# Asphalt 5 3.4.1 (armeabi) engine image this gate list was built for.
+# Asphalt 5 3.4.1 (armeabi) engine image the reference symbol snapshot and the
+# host's address constants were built for.
 EXPECTED_SO_SHA256 = "2966c986c73e71e7d2fa791a2f3a371749c7db183d7c40ff6641a57f01b78206"
 SO_ENTRY = "lib/armeabi/libasphalt5.so"
-BUILDER_VERSION = "1.0"
+BUILDER_VERSION = "1.1"
 
 
 def sha256_file(path: pathlib.Path) -> str:
@@ -82,44 +95,217 @@ def extract_apk(apk: pathlib.Path, work: pathlib.Path) -> tuple[pathlib.Path, st
     digest = hashlib.sha256(data).hexdigest()
     print("engine: %s (%d bytes, sha256 %s)" % (so, len(data), digest))
     if digest.lower() != EXPECTED_SO_SHA256:
-        print("\nWARNING: this is not the known Asphalt 5 3.4.1 armeabi engine.")
-        print("  expected sha256: %s" % EXPECTED_SO_SHA256)
-        print("  actual   sha256: %s" % digest)
-        print("The gate list is address-specific; a different build may translate")
-        print("incorrectly.  Re-run with --allow-unknown only if you understand this.")
-        if not getattr(extract_apk, "allow_unknown", False):
-            raise SystemExit("refusing unknown engine hash (use --allow-unknown)")
+        label = getattr(extract_apk, "profile_label", None)
+        if label:
+            print("engine build: %s (checked-in version profile)" % label)
+        else:
+            print("\nWARNING: this is not the known Asphalt 5 3.4.1 armeabi engine.")
+            print("  expected sha256: %s" % EXPECTED_SO_SHA256)
+            print("  actual   sha256: %s" % digest)
+            print("The reference gate list and host addresses are for 3.4.1;")
+            print("a profile is derived by symbol name when one is available.")
+            if not getattr(extract_apk, "allow_unknown", False):
+                raise SystemExit("refusing unknown engine hash (use --allow-unknown)")
     return so, digest
 
 
-def ensure_installer_assets(apk: pathlib.Path) -> None:
+def ensure_installer_assets(apk: pathlib.Path, host: pathlib.Path = HOST) -> None:
     sys.path.insert(0, str(TOOLS))
     try:
         from extract_installer_assets import extract as extract_assets
     except Exception as e:
         raise SystemExit("cannot import extract_installer_assets: %s" % e)
-    extract_assets(apk, HOST / "assets" / "installer")
+    extract_assets(apk, host / "assets" / "installer")
 
 
-def generated_files_present() -> bool:
-    need = [
-        HOST / "src" / "host" / "autogen_api.h",
-        HOST / "src" / "host" / "autogens.inc",
+def load_profile(digest: str) -> dict | None:
+    for p in sorted(VERSION_DIR.glob("profile-*.json")):
+        try:
+            prof = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if str(prof.get("engine_sha256", "")).lower() == digest.lower():
+            prof["_path"] = str(p)
+            return prof
+    return None
+
+
+def copy_host_tree(dst: pathlib.Path) -> pathlib.Path:
+    if dst.exists():
+        shutil.rmtree(dst)
+
+    def ignore(_dir, names):
+        skip = {"build", "build_gui", "a5host.exe", "a5host_gui.exe"}
+        return [n for n in names
+                if n in skip or n.startswith("autogen_part_")
+                or n in ("autogens.inc", "autogen_api.h")]
+
+    shutil.copytree(HOST, dst, ignore=ignore)
+    return dst
+
+
+def _profile_cmake(host: pathlib.Path, profile: dict) -> None:
+    cm = host / "CMakeLists.txt"
+    text = cm.read_text(encoding="utf-8")
+    marker = "target_compile_options(a5host PRIVATE"
+    defs = []
+    if profile.get("tolerant_data_check"):
+        defs.append("A5_TOLERANT_DATA=1")
+    if profile.get("default_pvrt"):
+        defs.append("A5_DEFAULT_PVRT=1")
+    if profile.get("auto_start_click"):
+        defs.append("A5_AUTO_START_CLICK=1")
+    if defs and marker in text:
+        add = ["target_compile_definitions(a5host PRIVATE %s)" % d for d in defs
+               if d.split('=')[0] not in text]
+        if add:
+            text = text.replace(marker, "\n".join(add) + "\n\n" + marker, 1)
+            cm.write_text(text, encoding="utf-8", newline="")
+
+
+def _sync_host_sources(host: pathlib.Path, profile: dict) -> None:
+    """Refresh the non-generated host sources on a --skip-translate rebuild."""
+    dst_src = host / "src"
+    for p in (HOST / "src").rglob("*"):
+        if not p.is_file() or p.name.startswith("autogen"):
+            continue
+        rel = p.relative_to(HOST)
+        dst = host / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, dst)
+    for name in ("CMakeLists.txt", "build_cmake.bat", "build_gui.bat"):
+        if (HOST / name).exists():
+            shutil.copy2(HOST / name, host / name)
+    _profile_cmake(host, profile)
+    tmp = host / "src_new"
+    vermap.rewrite_map(dst_src, tmp, profile["address_map"])
+    shutil.rmtree(dst_src)
+    tmp.rename(dst_src)
+
+
+def prepare_profile_host(profile: dict, work: pathlib.Path,
+                         reuse: bool = False) -> pathlib.Path:
+    """Create a host tree whose engine addresses match this profile."""
+    digest = profile["engine_sha256"]
+    host = ROOT / "build" / ("a5host_" + digest[:8])
+    if reuse and (host / "src" / "host" / "autogens.inc").exists():
+        print("host profile: refreshing sources in %s" % host)
+        _sync_host_sources(host, profile)
+        return host
+    copy_host_tree(host)
+
+    gate = []
+    for ent in profile["gate_list"]:
+        addr, _, name = ent.partition(" ")
+        gate.append("%s~ %s" % (addr, name))
+    (host / "list.txt").write_text(
+        "// generated from %s (%s)\n" % (profile["_path"], profile.get("label", "")) +
+        "\n".join(gate) + "\n", encoding="utf-8")
+    (host / "anchors.json").write_text(
+        json.dumps(profile["anchors"], indent=2) + "\n", encoding="utf-8")
+
+    _profile_cmake(host, profile)
+
+    src = host / "src"
+    tmp = host / "src_new"
+    vermap.rewrite_map(src, tmp, profile["address_map"])
+    shutil.rmtree(src)
+    tmp.rename(src)
+    print("host profile: %s (%d engine addresses, %d translated targets)" %
+          (profile.get("label") or digest[:8], len(profile["address_map"]),
+           len(profile["gate_list"])))
+    return host
+
+
+def extract_ref_so(ref_so, ref_apk, work: pathlib.Path) -> pathlib.Path | None:
+    """Locate the reference 3.4.1 engine for dynamic (unknown-version) mapping."""
+    if ref_so:
+        p = pathlib.Path(ref_so).resolve()
+        if not p.exists():
+            raise SystemExit("--ref-so not found: %s" % p)
+        return p
+    if ref_apk:
+        p = pathlib.Path(ref_apk).resolve()
+        if not p.exists():
+            raise SystemExit("--ref-apk not found: %s" % p)
+        return extract_so_from_apk(p, work / "reference")
+
+    cands = [
+        work.parent.parent / "Asphalt 5 3.4.1.apk",
+        ROOT / "Asphalt 5 3.4.1.apk",
     ]
-    need += [HOST / "src" / "host" / ("autogen_part_%02d.c" % i) for i in range(12)]
+    for c in cands:
+        if c.exists():
+            print("reference engine: %s" % c)
+            return extract_so_from_apk(c, work / "reference")
+    return None
+
+
+def extract_so_from_apk(apk: pathlib.Path, work: pathlib.Path) -> pathlib.Path:
+    with zipfile.ZipFile(apk) as z:
+        data = z.read(SO_ENTRY)
+    work.mkdir(parents=True, exist_ok=True)
+    out = work / "libasphalt5.so"
+    out.write_bytes(data)
+    print("reference engine: %s (%d bytes, sha256 %s)" %
+          (out, len(data), hashlib.sha256(data).hexdigest()))
+    return out
+
+
+def prepare_dynamic_host(so: pathlib.Path, digest: str, work: pathlib.Path,
+                         ref_so: pathlib.Path, tolerant_data: bool = False,
+                         default_pvrt: bool = False,
+                         auto_start_click: bool = False) -> pathlib.Path:
+    """Build a profile on the fly for an engine with no checked-in profile."""
+    ref = pathlib.Path(ref_so)
+    ref_digest = hashlib.sha256(ref.read_bytes()).hexdigest()
+    if ref_digest.lower() != EXPECTED_SO_SHA256:
+        raise SystemExit(
+            "the reference engine must be the known 3.4.1 build\n"
+            "  expected sha256: %s\n  actual   sha256: %s" %
+            (EXPECTED_SO_SHA256, ref_digest))
+    host = ROOT / "build" / ("a5host_" + digest[:8])
+    if host.exists():
+        shutil.rmtree(host)
+    work.mkdir(parents=True, exist_ok=True)
+    prof_path = work / "profile-auto.json"
+    profile = vermap.gen_profile(REF_SYMBOLS, ref, so, HOST / "src", LIST,
+                                 prof_path, label=digest[:8],
+                                 tolerant_data=tolerant_data,
+                                 default_pvrt=default_pvrt,
+                                 auto_start_click=auto_start_click)
+    profile["_path"] = str(prof_path)
+    return prepare_profile_host(profile, work)
+
+
+def generated_files_present(host: pathlib.Path = HOST) -> bool:
+    need = [
+        host / "src" / "host" / "autogen_api.h",
+        host / "src" / "host" / "autogens.inc",
+    ]
+    need += [host / "src" / "host" / ("autogen_part_%02d.c" % i) for i in range(12)]
     return all(p.exists() for p in need)
 
 
-def generate_translations(so: pathlib.Path, work: pathlib.Path) -> None:
+def generate_translations(so: pathlib.Path, work: pathlib.Path,
+                          host: pathlib.Path = HOST) -> None:
     syms = work / "symbols.txt"
     run([sys.executable, TOOLS / "extract_symbols.py", so, syms], ROOT)
     env = os.environ.copy()
     env["A5_SYMBOLS"] = str(syms)
+    list_path = host / "list.txt"
+    if not list_path.exists():
+        list_path = LIST
+    anchors = host / "anchors.json"
+    if anchors.exists():
+        env["A5_ANCHORS"] = str(anchors)
     print("\n[2/4] translating ARM functions to C (5k functions, this takes a while)")
-    run([sys.executable, TOOLS / "autotrans.py", "--gen", so, LIST,
-         HOST / "src" / "host" / "autogens.inc"], ROOT, env)
+    run([sys.executable, TOOLS / "autotrans.py", "--gen", so, list_path,
+         host / "src" / "host" / "autogens.inc"], ROOT, env)
     print("\n[3/4] applying post-generation patches and splitting into 12 chunks")
-    run([sys.executable, TOOLS / "postgen.py"], ROOT, env)
+    run([sys.executable, TOOLS / "postgen.py",
+         host / "src" / "host" / "autogens.inc"], ROOT, env)
+    env["A5_HOST"] = str(host)
     run([sys.executable, TOOLS / "split_autogens.py"], ROOT, env)
 
 
@@ -128,21 +314,21 @@ def assets_cache_dir() -> pathlib.Path:
     return pathlib.Path(base) / "Asphalt5" / "installer_assets"
 
 
-def build_host(release: bool, jobs: int, console: bool) -> pathlib.Path:
+def build_host(host: pathlib.Path, release: bool, jobs: int, console: bool) -> pathlib.Path:
     env = os.environ.copy()
     env["NUMBER_OF_PROCESSORS"] = str(max(1, jobs))
     if console:
         print("\n[4/4] building the console diagnostic host (O2)" if release else
               "\n[4/4] building the console diagnostic host (O1)")
-        cmd = ["cmd", "/c", str(HOST / "build_cmake.bat")]
+        cmd = ["cmd", "/c", str(host / "build_cmake.bat")]
         if release:
             cmd.append("release")
-        run(cmd, HOST, env)
-        exe = HOST / "a5host.exe"
+        run(cmd, host, env)
+        exe = host / "a5host.exe"
     else:
         print("\n[4/4] building the GUI-subsystem host (no console)")
-        run(["cmd", "/c", str(HOST / "build_gui.bat")], HOST, env)
-        exe = HOST / "a5host_gui.exe"
+        run(["cmd", "/c", str(host / "build_gui.bat")], host, env)
+        exe = host / "a5host_gui.exe"
     if not exe.exists():
         raise SystemExit("build finished but %s is missing" % exe)
     return exe
@@ -175,7 +361,14 @@ def copy_installed_data(src: pathlib.Path, out: pathlib.Path) -> None:
     shutil.copytree(src, dst, dirs_exist_ok=True)
 
 
-def write_readme(out: pathlib.Path, data_mode: str) -> None:
+def write_readme(out: pathlib.Path, data_mode: str, version: str = "3.4.1",
+                 legacy: bool = False) -> None:
+    legacy_none = (
+        "No game data is included.  This engine build has its own data layout;\n"
+        "  the 3.4.x download pack is not known to be compatible.  Put a\n"
+        "  complete %s data folder in sdcard\\gameloft\\games\\asphalt5, or\n"
+        "  rebuild with --installed-data pointing at that folder.\n"
+        "  A5_INSTALL_SKIP=1 skips the installer." % version)
     first = {
         "installed": ("The game data is already installed in "
                       "sdcard\\gameloft\\games\\asphalt5.  Double-click "
@@ -184,14 +377,16 @@ def write_readme(out: pathlib.Path, data_mode: str) -> None:
                   "installs from data\\packs.  Follow the on-screen installer."),
         "both": ("The game data is already installed; data\\packs is also "
                  "present as a fallback.  Double-click Asphalt5.exe."),
-        "none": ("No game data is included.  On first run the original "
-                 "installer will try Gameloft's data server.  If it is no "
-                 "longer available, re-run the builder with --packs "
-                 "(Asphalt5_Android_FULL_*.zip) or --installed-data from a "
-                 "device where you already installed the game."),
+        "none": legacy_none if legacy else (
+            "No game data is included.  On first run the original "
+            "installer will try Gameloft's data server.  If it is no "
+            "longer available, re-run the builder with --packs "
+            "(Asphalt5_Android_FULL_*.zip) or --installed-data from a "
+            "device where you already installed the game."),
     }[data_mode]
     text = """ASPHALT 5 (2010, Gameloft) - native x86-64 PC build
 ========================================================
+Engine: Asphalt 5 HD {version} (built from your APK)
 
 {first}
 
@@ -234,7 +429,7 @@ NOTES
     installed data or data packs.
 
 Built with the Asphalt 5 native pipeline (see README.md / docs/).
-""".format(first=first)
+""".format(first=first, version=version)
     (out / "README.txt").write_text(text, encoding="utf-8", newline="\r\n")
 
 
@@ -249,14 +444,15 @@ def embed_engine(exe: pathlib.Path, image: bytes) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Build a clean native Asphalt 5 3.4.1 PC installation "
-                    "from your APK.",
+        description="Build a clean native Asphalt 5 PC installation from your "
+                    "APK.  Known engine builds use a checked-in profile; other "
+                    "builds need --allow-unknown and the 3.4.1 reference engine.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__)
     ap.add_argument("apk", nargs="?", default=str(DEFAULT_APK),
-                    help="input Asphalt 5 3.4.1 APK (default: %(default)s)")
-    ap.add_argument("--out", default=str(DEFAULT_OUT),
-                    help="clean output folder (default: %(default)s)")
+                    help="input Asphalt 5 APK (default: %(default)s)")
+    ap.add_argument("--out", default=None,
+                    help="clean output folder (default: build/Asphalt5-<engine>-native)")
     ap.add_argument("--packs", default=None,
                     help="directory with Asphalt5_Android_FULL_*.zip data packs")
     ap.add_argument("--installed-data", default=None,
@@ -273,6 +469,20 @@ def main() -> int:
                     help="parallel compile jobs (default: all cores)")
     ap.add_argument("--allow-unknown", action="store_true",
                     help="allow an APK whose engine hash is not the known 3.4.1")
+    ap.add_argument("--ref-so", default=None,
+                    help="3.4.1 libasphalt5.so used as the address reference "
+                         "when no profile matches the input engine")
+    ap.add_argument("--ref-apk", default=None,
+                    help="3.4.1 APK to extract the reference engine from")
+    ap.add_argument("--tolerant-data", action="store_true",
+                    help="unknown build: accept a populated data folder "
+                         "(its own manifest), not the 3.4.1 exact-size list")
+    ap.add_argument("--default-pvrt", action="store_true",
+                    help="unknown build: default to the PVRTC texture path")
+    ap.add_argument("--auto-start-click", action="store_true",
+                    help="unknown build: splash waits for a tap (send two taps)")
+    ap.add_argument("--label", default=None,
+                    help="version label for the output folder/README")
     ap.add_argument("--force", action="store_true",
                     help="replace an existing output folder")
     ap.add_argument("--zip", action="store_true",
@@ -282,31 +492,82 @@ def main() -> int:
     args = ap.parse_args()
 
     apk = pathlib.Path(args.apk).resolve()
-    out = pathlib.Path(args.out).resolve()
     work = ROOT / "build" / "apk_work"
 
     print("=" * 68)
-    print(" Asphalt 5 3.4.1 native builder")
+    print(" Asphalt 5 native builder")
     print("=" * 68)
     print("APK:  %s" % apk)
-    print("OUT:  %s" % out)
     print("JOBS: %d" % args.jobs)
+
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True, exist_ok=True)
+
+    # 1) engine image (+ version check).  A checked-in profile makes an engine
+    # known, so the explicit --allow-unknown flag is only needed for new builds.
+    def apk_so_digest(path: pathlib.Path) -> str:
+        try:
+            with zipfile.ZipFile(path) as z:
+                return hashlib.sha256(z.read(SO_ENTRY)).hexdigest()
+        except (zipfile.BadZipFile, KeyError):
+            return ""
+
+    digest_hint = apk_so_digest(apk)
+    hint_profile = load_profile(digest_hint)
+    extract_apk.allow_unknown = (args.allow_unknown or
+                                 hint_profile is not None)  # type: ignore[attr-defined]
+    extract_apk.profile_label = ((hint_profile or {}).get("label") or
+                                 digest_hint[:8])  # type: ignore[attr-defined]
+    print("\n[1/4] reading APK")
+    so, so_hash = extract_apk(apk, work)
+
+    # pick the host tree for this engine
+    profile = load_profile(so_hash)
+    if so_hash.lower() == EXPECTED_SO_SHA256:
+        host = HOST
+        version_label = args.label or "3.4.1"
+        default_out = DEFAULT_OUT
+    elif profile is not None:
+        host = prepare_profile_host(profile, work, reuse=args.skip_translate)
+        version_label = args.label or profile.get("label") or so_hash[:8]
+        default_out = ROOT / "build" / ("Asphalt5-%s-native" % version_label)
+    else:
+        if not args.allow_unknown:
+            raise SystemExit(
+                "no version profile for engine sha256 %s\n"
+                "known profiles: %s\n"
+                "re-run with --allow-unknown (plus --ref-so/--ref-apk) to "
+                "derive one at build time" %
+                (so_hash, ", ".join(p.name for p in VERSION_DIR.glob("profile-*.json"))))
+        ref = extract_ref_so(args.ref_so, args.ref_apk, work)
+        if ref is None:
+            sibling = apk.parent / "Asphalt 5 3.4.1.apk"
+            if sibling.exists():
+                print("reference engine: %s" % sibling)
+                ref = extract_so_from_apk(sibling, work / "reference")
+        if ref is None:
+            raise SystemExit(
+                "no checked-in profile and no reference engine found.\n"
+                "Pass --ref-so <3.4.1 libasphalt5.so> or --ref-apk <3.4.1 apk>.")
+        host = prepare_dynamic_host(so, so_hash, work, ref,
+                                    tolerant_data=args.tolerant_data,
+                                    default_pvrt=args.default_pvrt,
+                                    auto_start_click=args.auto_start_click)
+        version_label = args.label or so_hash[:8]
+        default_out = ROOT / "build" / ("Asphalt5-%s-native" % version_label)
+
+    out = pathlib.Path(args.out).resolve() if args.out else default_out.resolve()
+    print("OUT:  %s" % out)
+    print("HOST: %s" % host)
 
     if out.exists():
         if not args.force:
             raise SystemExit("output exists: %s (use --force to replace)" % out)
         shutil.rmtree(out)
-    if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True, exist_ok=True)
-
-    # 1) engine image (+ version check)
-    extract_apk.allow_unknown = args.allow_unknown  # type: ignore[attr-defined]
-    print("\n[1/4] reading APK")
-    so, so_hash = extract_apk(apk, work)
 
     # installer assets are needed both to build the host and at runtime
-    ensure_installer_assets(apk)
+    ensure_installer_assets(apk, host)
     print("installer assets: OK")
 
     # 2/3) translations
@@ -317,14 +578,14 @@ def main() -> int:
         print("\n[2-4/4] using prebuilt host, skipping translation/build: %s" % exe)
     else:
         if args.skip_translate:
-            if not generated_files_present():
+            if not generated_files_present(host):
                 raise SystemExit(
                     "--skip-translate requested but generated chunks are missing;\n"
                     "run without it (full generation), or provide --exe.")
             print("\n[2-3/4] reusing existing generated chunks")
         else:
-            generate_translations(so, work)
-        exe = build_host(args.release, args.jobs, args.console)
+            generate_translations(so, work, host)
+        exe = build_host(host, args.release, args.jobs, args.console)
 
     # 4) stage the clean installation
     print("\nstaging clean install (strip + embed engine data)")
@@ -335,7 +596,7 @@ def main() -> int:
 
     # The original installer sprites are needed only on first run; keep them
     # outside the game folder so the output stays free of APK-derived files.
-    assets_src = HOST / "assets" / "installer"
+    assets_src = host / "assets" / "installer"
     cache = assets_cache_dir()
     if cache.exists():
         shutil.rmtree(cache)
@@ -367,7 +628,8 @@ def main() -> int:
         data_mode = "both" if data_mode == "packs" else "installed"
 
     (out / "saves").mkdir(exist_ok=True)
-    write_readme(out, data_mode)
+    write_readme(out, data_mode, version_label,
+                 legacy=(so_hash.lower() != EXPECTED_SO_SHA256))
 
     total = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print("\nclean install: %s" % out)

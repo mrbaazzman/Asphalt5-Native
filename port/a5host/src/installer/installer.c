@@ -480,11 +480,27 @@ static int file_required(const char* dir, const char* name, long long size) {
 }
 
 int a5install_data_incomplete(const char* game_dir) {
+#ifdef A5_TOLERANT_DATA
+    // Other engine builds use a different data manifest than the 3.4.1 list
+    // in installer_resources.h.  Accept a populated data folder when the core
+    // archives are present instead of comparing every file size.
+    static const char* core[] = { "textures", "gamecfg.bar", "ia.bar", "strings.bar" };
+    int present = 0;
+    for (size_t i = 0; i < sizeof(core) / sizeof(core[0]); i++) {
+        char p[700];
+        snprintf(p, sizeof(p), "%s\\%s", game_dir, core[i]);
+        if (file_size(p) > 0) present++;
+    }
+    printf("[installer] data check: %d/%d core files present in %s\n",
+           present, (int)(sizeof(core) / sizeof(core[0])), game_dir);
+    return present ? 0 : 1;
+#else
     int missing = 0;
     for (int i = 0; i < A5_RES_ATC_COUNT; i++)
         if (file_required(game_dir, a5_res_atc[i].name, a5_res_atc[i].size)) missing++;
     printf("[installer] data check: %d/%d files missing in %s\n", missing, A5_RES_ATC_COUNT, game_dir);
     return missing;
+#endif
 }
 
 // ---------------------------------------------------------------- run

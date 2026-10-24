@@ -1,7 +1,9 @@
 # Asphalt 5 — Native x86-64 PC Port
 
-A **pure native x86-64 recompilation** of *Asphalt 5 HD 3.4.1* (Gameloft,
-2010, Android `armeabi`), built from **your own APK**.
+A **pure native x86-64 recompilation** of *Asphalt 5 HD* (Gameloft, 2010,
+Android `armeabi`), built from **your own APK**. The pipeline is verified on
+the **3.4.1** engine (5,081 translated functions) and the **3.3.7** engine
+(5,270 translated functions).
 
 The game's ARM engine is statically translated to C, compiled for x86-64,
 and runs against a PC platform layer (JNI/libc/C++ shims, desktop OpenGL,
@@ -122,6 +124,64 @@ builder never downloads, bundles, or redistributes game data.
 
 ---
 
+## Other engine versions (3.3.7 and similar builds)
+
+The pipeline is not limited to 3.4.1. The host and its hooks address the engine
+through **symbol names**, so another build of the same engine can be mapped by
+name and rebuilt:
+
+```bat
+python build_from_apk.py "Asphalt 5 HD 3.3.7.apk"
+```
+
+A checked-in **profile** (`analysis/version/profile-3.3.7.json`) supplies the
+432 host address remappings, 5,287 translated function addresses and the
+post-generation anchors for 3.3.7. The builder creates
+`build/a5host_<hash8>/`, rewrites the engine addresses in that copy, translates
+the target engine (5,270 functions), and stages
+`build/Asphalt5-3.3.7-native/`. No extra flags are needed.
+
+For a build with no profile, add one (requires the 3.4.1 engine as the address
+reference):
+
+```bat
+python analysis/tools/vermap.py genprofile ^
+  analysis/version/symbols-3.4.1.txt target-libasphalt5.so ^
+  port/a5host/src analysis/autogen/list.txt ^
+  analysis/version/profile-<version>.json ^
+  --ref-so reference-3.4.1-libasphalt5.so ^
+  --label <version> --tolerant-data --default-pvrt
+python build_from_apk.py "Asphalt 5 <version>.apk"
+```
+
+`--default-pvrt` is for PVRTC tablet builds (3.3.7 already has it in its
+profile); `A5_ATC=1` forces the ATC texture path instead.
+
+**Verified for 3.3.7:** the port boots the engine, reaches the main menu with
+the car/UI/animated background, starts Quick Race and renders the race HUD and
+tutorial with the official Galaxy Tab PVRT resource pack. 5,270 functions are
+translated; no untranslated code is reached.
+
+See [`analysis/version/README.md`](analysis/version/README.md) for the mapping
+rules, the 3.3.7 differences (renamed Java package, `__android_log_write`, the
+345-entry data manifest) and verification steps. In short:
+
+- JNI exports are matched by their trailing `Class_method` name, so the Java
+  package rename between releases is handled automatically.
+- The gate list is rebuilt by symbol name and extended with every target ARM
+  function; the strict backend still reports anything it cannot translate.
+- **Game data is version-specific.** Use `--installed-data` with a data folder
+  that belongs to the same version; a 3.4.x pack is not guaranteed to work on a
+  3.3.7 engine. The 3.3.7 APK's own `GameInstaller` URL points at the
+  `AndroidResources_PVRT.zip` master file (345 files, 220.98 MB inflated);
+  `analysis/tools/unpack_master.py` + `analysis/version/data-3.3.7.json`
+  installs it offline.
+- 17 translator refusals remain in 3.3.7 (JPEG2000 encoder, multiplayer,
+  online, C++ throw helpers) and mirror the 3.4.1 set; the offline single-player
+  path is covered.
+
+---
+
 ## Controls
 
 | Input | Action |
@@ -137,6 +197,10 @@ The keyboard path goes through the engine's own key system
 
 **Click the mouse or press Esc to skip the intro/reward video.** Clicks in the
 first 500 ms are ignored so focusing the game window does not skip it.
+
+On the 3.3.7 build the splash screen waits for a tap; its profile enables
+`A5_AUTO_START_CLICK`, which sends two taps after the intro so the main menu
+appears on its own. Set `A5_TEST_CLICK="frame:x:y;..."` to override the taps.
 
 ## Resolution
 
