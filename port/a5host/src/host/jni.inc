@@ -100,6 +100,12 @@ static int a5_jni_load_sound(int id, int is_big) {
     snprintf(name, sizeof(name), "raw_%03d.glsnd", id);
     size_t len = 0;
     uint8_t* d = resolve_res(name, &len);
+    if (!d || len == 0) {
+        // 3.3.x's installer manifest ships the sounds as raw_NNN.ogg; 3.4.x
+        // stores the same resources as .glsnd.  Try both.
+        snprintf(name, sizeof(name), "raw_%03d.ogg", id);
+        d = resolve_res(name, &len);
+    }
     if (!d || len == 0) { printf("[snd] asset %s not found\n", name); return 0; }
     printf("[snd] load %s (%zu bytes, %s)\n", name, len, is_big ? "music" : "sfx");
     a5audio_load(id, d, (int)len, is_big);

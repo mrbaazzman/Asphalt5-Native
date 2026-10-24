@@ -452,7 +452,8 @@ def rewrite_map(src_root, dst_root, address_map):
 
 def gen_profile(ref_snapshot, ref_so, target_so, src_root, list_path, out_path,
                 label="", tolerant_data=False, default_pvrt=False,
-                auto_start_click=False, logical_screen="", default_window=""):
+                auto_start_click=False, logical_screen="", default_window="",
+                data_manifest="", master_url_pvrt="", master_url_atc=""):
     ref = Engine(ref_so)
     tgt = Engine(target_so)
     res = Resolver(ref_snapshot, tgt)
@@ -524,6 +525,9 @@ def gen_profile(ref_snapshot, ref_so, target_so, src_root, list_path, out_path,
         "auto_start_click": bool(auto_start_click),
         "logical_screen": logical_screen,
         "default_window": default_window,
+        "data_manifest": data_manifest,
+        "master_url_pvrt": master_url_pvrt,
+        "master_url_atc": master_url_atc,
     }
     pathlib.Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     pathlib.Path(out_path).write_text(json.dumps(profile, indent=1) + "\n",
@@ -710,6 +714,12 @@ def main(argv=None):
                    help="engine layout resolution, e.g. 1024x600")
     p.add_argument("--default-window", default="",
                    help="default render/window size, e.g. 1920x1080")
+    p.add_argument("--data-manifest", default="",
+                   help="data manifest JSON in analysis/version, e.g. data-3.3.7.json")
+    p.add_argument("--master-url-pvrt", default="",
+                   help="PVRT master download URL from the APK's GameInstaller")
+    p.add_argument("--master-url-atc", default="",
+                   help="ATC master download URL from the APK's GameInstaller")
 
     a = ap.parse_args(argv)
     if a.cmd == "snapshot":
@@ -729,7 +739,8 @@ def main(argv=None):
     elif a.cmd == "genprofile":
         gen_profile(a.snapshot, a.ref_so, a.target_so, a.src, a.list, a.out,
                     a.label, a.tolerant_data, a.default_pvrt,
-                    a.auto_start_click, a.logical_screen, a.default_window)
+                    a.auto_start_click, a.logical_screen, a.default_window,
+                    a.data_manifest, a.master_url_pvrt, a.master_url_atc)
     return 0
 
 

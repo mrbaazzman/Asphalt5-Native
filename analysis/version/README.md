@@ -32,9 +32,13 @@ resources (`AndroidResources_PVRT.zip` from the APK's `GameInstaller` URL,
   `Play windowed.bat` (1280×720) is included for smaller desktops.
 * `GS_LoadGame` (Quick Race) starts; the race load is functional but slow in
   the O1 console build
-* audio effects that the engine requests as `raw_*.glsnd` from the Java
-  resource layer are silent because the 3.3.x master pack stores its Ogg data
-  inside the `package_general` shards instead of separate files
+* first-run installer: from a clean install it downloads the APK's own
+  `AndroidResources_PVRT.zip` URL (138,863,062 bytes), follows the
+  `droid06.gameloft.com` redirect, inflates 220,975,120 bytes and writes all
+  345 files; the game then boots normally
+* audio: the 3.3.x installer manifest ships its sounds as `raw_NNN.ogg`;
+  the host now falls back from the 3.4.x `raw_NNN.glsnd` name to `.ogg`,
+  so menu/race effects load from the same data folder
 
 The 3.3.7 APK's `GameInstaller.<init>` contains the exact 345-entry file
 manifest (a `String[]` of names and a `fill-array-data` `int[]` of sizes).
@@ -61,6 +65,11 @@ The 3.3.7 APK's `GameInstaller` downloads a single zlib master file (the URL
 is in `classes.dex`; for the Galaxy Tab build it is
 `AndroidResources_PVRT.zip`). The manifest of that stream is checked in as
 `data-3.3.7.json` (345 names + sizes, total 220,975,120 bytes):
+
+The 3.3.7 profile also embeds that URL and the 345-file manifest in the host
+installer, so a fresh `Asphalt5.exe` can download the PVRT master itself (the
+same first-run flow as the phone app).  Use `--installed-data` only when you
+already have a complete data folder and want to skip the download.
 
 ```bat
 python analysis/tools/unpack_master.py ^
@@ -153,11 +162,13 @@ derives the same information on the fly.
   online `GLXPlayerUser*` (`ldrd`), C++ `stlp_priv` throw helpers, and
   `CMatrix::Mult/PreMult/SetMult` (`vmsr` — these are replaced by the
   hand-written natives anyway). 5,270 functions are translated.
-* The Java installer/data manifest is different. The profile uses a tolerant
-  data check (`textures`, `gamecfg.bar`, `ia.bar`, `strings.bar`) and
-  `--installed-data` is the reliable way to use a 3.3.7 data folder. Data
-  packs are version-specific: a 3.4.x pack is not guaranteed to match a 3.3.7
-  engine.
+* The Java installer/data manifest is different. The 3.3.7 profile uses its
+  own 345-file manifest and its own PVRT URL; the first-run installer downloads
+  and installs it. `--installed-data` still works. Note that this particular
+  3.3.7 APK is the Galaxy Tab PVRT build: its `GameInstaller` contains only the
+  PVRT URL (plus the old TNB pack), not an ATC URL. An ATC 3.3.x build would
+  need its own URL and manifest in a new profile. The 3.4.1 APK contains both
+  ATC and PVRT 3.4.2 URLs.
 * The first-run installer artwork is extracted from the selected APK, but the
   font atlas index map (`analysis/autogen/font_map.h`) is the 3.4.1 map. Text
   in the installer can be misaligned on other builds; gameplay is unaffected.

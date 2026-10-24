@@ -26,6 +26,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include "installer_resources.h"
+#ifdef A5_DATA_LEGACY
+// Generated per version profile: the exact name/size manifest + master URL
+// from that APK's GameInstaller (e.g. 3.3.7's 345-file PVRT pack).
+#include "a5data_profile.h"
+#define A5_DATA_COUNT A5_DATA_LEGACY_COUNT
+#define A5_DATA_RES   a5_data_legacy_res
+#else
+#define A5_DATA_COUNT A5_RES_ATC_COUNT
+#define A5_DATA_RES   a5_res_atc
+#endif
 #include "puff.h"
 #include "../gl/a5gl.h"
 
@@ -480,7 +490,7 @@ static int file_required(const char* dir, const char* name, long long size) {
 }
 
 int a5install_data_incomplete(const char* game_dir) {
-#ifdef A5_TOLERANT_DATA
+#if defined(A5_TOLERANT_DATA) && !defined(A5_DATA_LEGACY)
     // Other engine builds use a different data manifest than the 3.4.1 list
     // in installer_resources.h.  Accept a populated data folder when the core
     // archives are present instead of comparing every file size.
@@ -496,9 +506,10 @@ int a5install_data_incomplete(const char* game_dir) {
     return present ? 0 : 1;
 #else
     int missing = 0;
-    for (int i = 0; i < A5_RES_ATC_COUNT; i++)
-        if (file_required(game_dir, a5_res_atc[i].name, a5_res_atc[i].size)) missing++;
-    printf("[installer] data check: %d/%d files missing in %s\n", missing, A5_RES_ATC_COUNT, game_dir);
+    for (int i = 0; i < A5_DATA_COUNT; i++)
+        if (file_required(game_dir, A5_DATA_RES[i].name, A5_DATA_RES[i].size)) missing++;
+    printf("[installer] data check: %d/%d files missing in %s\n",
+           missing, A5_DATA_COUNT, game_dir);
     return missing;
 #endif
 }
@@ -585,6 +596,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
     int force_local = getenv("A5_INSTALL_LOCAL") != NULL;
     // the download links the real installer reads from res/raw/datalink.txt:
     // "<ATC url>?<PVRT url>"
+#ifndef A5_DATA_LEGACY
     {
         char p[600];
         snprintf(p, sizeof(p), "%s\\datalink.txt", adir);
@@ -600,7 +612,17 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
             free(ld);
         }
     }
+#endif
     int use_pvrt = getenv("A5_PVRT") != NULL;
+#ifdef A5_DATA_LEGACY
+    // Profile URLs from the APK's own GameInstaller (3.3.7 is PVRT-only).
+    if (!url_pvrt[0]) snprintf(url_pvrt, sizeof(url_pvrt), "%s", A5_DATA_URL_PVRT);
+    if (!url_atc[0]) snprintf(url_atc, sizeof(url_atc), "%s", A5_DATA_URL_ATC);
+#endif
+#ifdef A5_DEFAULT_PVRT
+    if (!getenv("A5_ATC")) use_pvrt = 1;
+    if (getenv("A5_PVRT")) use_pvrt = 1;
+#endif
     int dl_started = 0;
 
     int running = 1;
@@ -645,13 +667,14 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
         } else if (state == ST_DOWNLOAD) {
             if (dl_phase == 1) {   // begin the download (official servers first)
                 char url[512];
-                if (force_local || !url_atc[0]) {
+                const char* remote = use_pvrt ? url_pvrt : url_atc;
+                if (force_local || !remote[0]) {
                     snprintf(url, sizeof(url), "http://127.0.0.1:%d/data", srv_port);
                 } else {
-                    snprintf(url, sizeof(url), "%s", use_pvrt && url_pvrt[0] ? url_pvrt : url_atc);
+                    snprintf(url, sizeof(url), "%s", remote);
                 }
                 if (!http_begin_url(&dl, url)) {
-                    if (!force_local && url_atc[0]) {
+                    if (!force_local && remote[0]) {
                         printf("[installer] official server unreachable - using the local fallback\n");
                         snprintf(url, sizeof(url), "http://127.0.0.1:%d/data", srv_port);
                         if (!http_begin_url(&dl, url)) fail = 1;
@@ -678,7 +701,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
             } else if (dl_phase == 2) {  // inflate on a worker thread (the UI stays live)
                 if (!infl_th) {
                     unsigned long out = 0;
-                    for (int i = 0; i < A5_RES_ATC_COUNT; i++) out += (unsigned long)a5_res_atc[i].size;
+                    for (int i = 0; i < A5_DATA_COUNT; i++) out += (unsigned long)A5_DATA_RES[i].size;
                     raw = (unsigned char*)malloc(out ? out : 1);
                     raw_len = out;
                     g_infl_src = dl.buf + 2;            // skip the 2-byte zlib header
@@ -703,8 +726,8 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                 }
             } else if (dl_phase == 3) {  // write files (a slice per frame for the UI)
                 long long budget = 6LL << 20;
-                while (budget > 0 && dl_file < A5_RES_ATC_COUNT) {
-                    const A5ResEntry* e = &a5_res_atc[dl_file];
+                while (budget > 0 && dl_file < A5_DATA_COUNT) {
+                    const A5ResEntry* e = &A5_DATA_RES[dl_file];
                     long long left = (long long)e->size - dl_off;
                     long long chunk = left < budget ? left : budget;
                     char p[700];
@@ -714,7 +737,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                     if (f) {
                         if (dl_off > 0) _fseeki64(f, dl_off, SEEK_SET);
                         long long base = 0;
-                        for (int k = 0; k < dl_file; k++) base += a5_res_atc[k].size;
+                        for (int k = 0; k < dl_file; k++) base += A5_DATA_RES[k].size;
                         fwrite(raw + base + dl_off, 1, (size_t)chunk, f);
                         fclose(f);
                     } else {
@@ -726,7 +749,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                     if (dl_off >= (long long)e->size) { dl_file++; dl_off = 0; }
                     if (fail) break;
                 }
-                if (fail || dl_file >= A5_RES_ATC_COUNT) { dl_phase = 4; if (fail) running = 0; else state = ST_SUCCESS; }
+                if (fail || dl_file >= A5_DATA_COUNT) { dl_phase = 4; if (fail) running = 0; else state = ST_SUCCESS; }
             }
         }
 
@@ -773,7 +796,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                     long long tot = dl.total > 0 ? dl.total : (long long)dl.len + 1;
                     level = (int)((long long)dl.len * fw / tot);
                 } else {
-                    level = (int)((long long)(dl_file + 1) * fw / A5_RES_ATC_COUNT);
+                    level = (int)((long long)(dl_file + 1) * fw / A5_DATA_COUNT);
                 }
                 if (level > fw) level = fw;
                 if (level < 0) level = 0;
@@ -791,7 +814,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                     static const char* dots[] = { "", ".", "..", "..." };
                     snprintf(buf, sizeof(buf), "Initializing%s", dots[(now / 400) & 3]);
                 } else
-                    snprintf(buf, sizeof(buf), "%d / %d files", dl_file, A5_RES_ATC_COUNT);
+                    snprintf(buf, sizeof(buf), "%d / %d files", dl_file, A5_DATA_COUNT);
                 font_draw(&font, buf, w / 2, h - 100, 1, 0);
             }
         }

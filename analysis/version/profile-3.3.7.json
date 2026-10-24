@@ -5745,5 +5745,8 @@
  "default_pvrt": true,
  "auto_start_click": true,
  "logical_screen": "1024x600",
- "default_window": "1920x1080"
+ "default_window": "1920x1080",
+ "data_manifest": "data-3.3.7.json",
+ "master_url_pvrt": "http://dl.gameloft.com/hdplus/android/asphalt5/Samsung_P1000_Galaxy_Tab/ml/3.3.3/AndroidResources_PVRT.zip",
+ "master_url_atc": ""
 }

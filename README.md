@@ -91,6 +91,14 @@ Then run `Asphalt5\Asphalt5.exe` directly; it is a GUI application with no conso
 
 The APK is only ~5 MB. It contains the engine and the installer, **not** the
 ~100 MB game data. The original game downloads/installs that data separately.
+The native host reproduces that first-run flow:
+
+- **3.3.7**: downloads the APK's own Galaxy Tab PVRT master
+  (`AndroidResources_PVRT.zip`, 138.8 MB → 345 files) and installs it.
+- **3.4.1**: downloads the ATC/PVRT 3.4.2 pack from its `datalink.txt`.
+
+You can also provide data yourself:
+
 Choose one:
 
 ```bat
@@ -173,12 +181,12 @@ rules, the 3.3.7 differences (renamed Java package, `__android_log_write`, the
   package rename between releases is handled automatically.
 - The gate list is rebuilt by symbol name and extended with every target ARM
   function; the strict backend still reports anything it cannot translate.
-- **Game data is version-specific.** Use `--installed-data` with a data folder
-  that belongs to the same version; a 3.4.x pack is not guaranteed to work on a
-  3.3.7 engine. The 3.3.7 APK's own `GameInstaller` URL points at the
-  `AndroidResources_PVRT.zip` master file (345 files, 220.98 MB inflated);
-  `analysis/tools/unpack_master.py` + `analysis/version/data-3.3.7.json`
-  installs it offline.
+- **Game data is version-specific.** The 3.3.7 build's first-run installer
+  downloads the PVRT master from the APK's own `GameInstaller` URL and splits
+  it with the 345-file manifest; `--installed-data` skips the download when you
+  already have the folder. The 3.4.1 build downloads the ATC/PVRT 3.4.2 packs
+  from its `datalink.txt`. `analysis/tools/unpack_master.py` +
+  `analysis/version/data-*.json` install either master offline.
 - 17 translator refusals remain in 3.3.7 (JPEG2000 encoder, multiplayer,
   online, C++ throw helpers) and mirror the 3.4.1 set; the offline single-player
   path is covered.

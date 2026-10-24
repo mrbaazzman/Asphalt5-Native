@@ -1773,25 +1773,6 @@ int main(int argc, char** argv) {
         int force = getenv("A5_INSTALL") != NULL;
         int skip = getenv("A5_INSTALL_SKIP") != NULL;
         if (!skip && (force || a5install_data_incomplete(game_dir))) {
-#ifdef A5_TOLERANT_DATA
-            // Legacy builds use their own data manifest; the 3.4.x installer
-            // pack is not a safe fallback.  Explain what is missing instead of
-            // downloading a mismatched pack.  A5_INSTALL=1 still forces it.
-            if (!force) {
-                char msg[1200];
-                snprintf(msg, sizeof(msg),
-                         "No compatible game data was found in:\n%s\n\n"
-                         "Copy the data folder for this engine version there, or "
-                         "rebuild with --installed-data pointing at it.\n\n"
-                         "(Set A5_INSTALL=1 to run the legacy downloader anyway.)",
-                         game_dir);
-                printf("[host] %s\n", msg);
-                fflush(stdout);
-                MessageBoxA(NULL, msg, "Asphalt 5 - data required",
-                            MB_OK | MB_ICONINFORMATION);
-                return 0;
-            }
-#endif
             char master[MAX_PATH + 64];
             // dist layout first (<exe>\data\packs), then the dev layout
             const char* pack = use_atc ?
