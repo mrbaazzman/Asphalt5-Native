@@ -207,11 +207,10 @@ appears on its own. Set `A5_TEST_CLICK="frame:x:y;..."` to override the taps.
 
 ## Resolution
 
-The default render size is **1920×1080 physical pixels**, or the desktop size
-when the visible desktop is smaller (laptops, 125% scaled panels, remote
-sessions). The process is DPI-aware, so Windows display scaling does not blur
-or virtualize the game. On a 1080p display the window is borderless. If the
-window is still too large, run `Play windowed.bat` (1280×720 bordered) or set
+The default render size is **1920×1080 physical pixels**, borderless (the
+3.3.7 profile uses the same 1080p default). The process is DPI-aware, so
+Windows display scaling does not blur or virtualize the game. If the window is
+too large for your desktop, run `Play windowed.bat` (1280×720 bordered) or set
 `A5_WINDOW=1280x720` and `A5_WINDOWED=1`.
 
 The engine's original **854×480 logical layout** is preserved and scaled to

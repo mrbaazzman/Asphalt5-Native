@@ -10,6 +10,8 @@ addresses.
 |---|---|
 | `symbols-3.4.1.txt` | Reference symbol table (`address kind size mangled-name`). Interoperability metadata only: no code. Used to find the reference symbol that owns a host address. |
 | `profile-3.3.7.json` | Complete build profile for the 3.3.7 engine: engine sha256, the 432 host address remappings, 5,287 translated function addresses, postgen anchors, the tolerant data-check mode, the PVRT default, the 1024×600 logical layout and the splash auto-taps. |
+| `data-3.3.7.json` | 345-file manifest of the 3.3.7 master data pack (220,975,120 bytes). |
+| `data-3.4.1.json` | 324-file manifest of the 3.4.2 ATC pack used by the 3.4.1 APK (160,999,755 bytes). |
 
 ## Verified 3.3.7 status
 
@@ -73,6 +75,16 @@ python build_from_apk.py "Asphalt 5 HD 3.3.7.apk" ^
 The tool validates the inflated size, splits the stream in manifest order and
 reports any mismatch. The output folder can also be copied to
 `sdcard\gameloft\games\asphalt5` next to an existing `Asphalt5.exe`.
+
+For 3.4.1 the APK's `datalink.txt` points at the 3.4.2 ATC/PVRT packs. The ATC
+layout is checked in as `data-3.4.1.json` (324 files, 160,999,755 bytes), so
+the same command works with the 3.4.2 ATC master:
+
+```bat
+python analysis/tools/unpack_master.py Asphalt5_Android_FULL_ATC_342.zip ^
+  analysis/version/data-3.4.1.json build\data-3.4.1
+python build_from_apk.py "Asphalt 5 3.4.1.apk" --installed-data build\data-3.4.1
+```
 
 ## Add another build
 

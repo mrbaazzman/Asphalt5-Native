@@ -1337,32 +1337,12 @@ int main(int argc, char** argv) {
             win_w = scr_w;
             win_h = scr_h;
         } else {
-            // The default is 1080p physical pixels.  On a smaller/remote
-            // desktop (or a 125% scaled 1080p panel) a 1920x1080 borderless
-            // window can extend past the visible area, cutting off the bottom
-            // of the UI.  Use the logical desktop size in that case and keep
-            // the window borderless so the whole game fits.
-            int dpi = 96;
-            HMODULE u32m = GetModuleHandleA("user32.dll");
-            typedef UINT (WINAPI *get_dpi_t)(void);
-            get_dpi_t get_dpi = u32m ? (get_dpi_t)GetProcAddress(u32m, "GetDpiForSystem") : NULL;
-            if (get_dpi) dpi = (int)get_dpi();
-            if (dpi < 96) dpi = 96;
-            int lw = MulDiv(GetSystemMetrics(SM_CXSCREEN), 96, dpi);
-            int lh = MulDiv(GetSystemMetrics(SM_CYSCREEN), 96, dpi);
-            if (lw > 0 && lh > 0 && (lw < 1600 || lh < 900)) {
-                win_w = lw;
-                win_h = lh;
-                SetEnvironmentVariableA("A5_BORDERLESS", "1");
-                SetEnvironmentVariableA("A5_WINDOWED", NULL);
-            } else {
-                win_w = 1920;
-                win_h = 1080;
-                int dw = GetSystemMetrics(SM_CXSCREEN);
-                int dh = GetSystemMetrics(SM_CYSCREEN);
-                if (dw > 0 && win_w > dw) win_w = dw;
-                if (dh > 0 && win_h > dh) win_h = dh;
-            }
+            win_w = 1920;
+            win_h = 1080;
+            int dw = GetSystemMetrics(SM_CXSCREEN);
+            int dh = GetSystemMetrics(SM_CYSCREEN);
+            if (dw > 0 && win_w > dw) win_w = dw;
+            if (dh > 0 && win_h > dh) win_h = dh;
         }
 #endif
     }
