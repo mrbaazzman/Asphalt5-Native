@@ -182,6 +182,16 @@ static int bs_frame_h(BsSprite* s, int frame) {
     return fh;
 }
 
+// Buttons are drawn with their centre at (cx,cy); the frame's module offsets
+// may be negative.  Hit-test the exact rectangle that is on screen.
+static int bs_frame_hit(BsSprite* s, int frame, int cx, int cy, int x, int y) {
+    int fx, fy, fw, fh;
+    bs_frame_rect(s, frame, &fx, &fy, &fw, &fh);
+    return fw > 0 && fh > 0 &&
+           x >= cx + fx && x <= cx + fx + fw &&
+           y >= cy + fy && y <= cy + fy + fh;
+}
+
 // ---------------------------------------------------------------- font
 #include "../../assets/installer/font_map.h"   // a5_font_map[256]: char -> font_menu fmodule index
 
@@ -521,6 +531,36 @@ int a5install_data_incomplete(const char* game_dir) {
 #define ST_SUCCESS  7
 #define ST_DONE     10
 
+// The installer draws in the game's logical coordinate space (1024x600 for
+// 3.3.7), but the window can be much larger (the default is 1920x1080).
+// These raw-GL calls bypass the engine's GL bridge, so scale them here exactly
+// like the bridge does: fit the logical frame into the window, centered.
+static void install_view_rect(int w, int h, int* vx, int* vy, int* vw, int* vh) {
+    a5gl_view_rect(vx, vy, vw, vh);
+    if (*vw <= 0 || *vh <= 0) {
+        int cw = 0, ch = 0;
+        a5gl_client_size(&cw, &ch);
+        *vx = 0; *vy = 0;
+        *vw = cw > 0 ? cw : w;
+        *vh = ch > 0 ? ch : h;
+    }
+}
+
+// a5gl_poll_input reports client/window pixels; the hit tests below use the
+// logical 1024x600 space.  Without this, every 1080p click lands roughly twice
+// as far right/down as the button it was aimed at.
+static void install_map_input(int* x, int* y, int w, int h) {
+    int vx = 0, vy = 0, vw = 0, vh = 0;
+    install_view_rect(w, h, &vx, &vy, &vw, &vh);
+    if (vw <= 0 || vh <= 0) return;
+    *x = (int)((long long)(*x - vx) * w / vw);
+    *y = (int)((long long)(*y - vy) * h / vh);
+    if (*x < 0) *x = 0;
+    if (*y < 0) *y = 0;
+    if (*x >= w) *x = w - 1;
+    if (*y >= h) *y = h - 1;
+}
+
 int a5install_run(const char* game_dir, const char* master, int w, int h) {
     setvbuf(stdout, NULL, _IONBF, 0);   // keep the log even if the process is killed
     printf("[installer] first-run installer: dir=%s master=%s screen=%dx%d\n", game_dir, master, w, h);
@@ -580,6 +620,7 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
     int down_x = -1, down_y = -1;
     // A5_INSTALL_AUTO=1: scripted test - auto-answer YES and auto-continue.
     int auto_mode = getenv("A5_INSTALL_AUTO") != NULL;
+    int install_debug = getenv("A5_INSTALL_DEBUG") != NULL;
     int auto_ms = 0;
 
     // download machinery
@@ -634,6 +675,16 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
         // input
         int evt, mx, my;
         while (a5gl_poll_input(&evt, &mx, &my)) {
+            int raw_x = mx, raw_y = my;
+            install_map_input(&mx, &my, w, h);
+            if (install_debug)
+                printf("[installer] input evt=%d client=(%d,%d) logical=(%d,%d) state=%d\n",
+                       evt, raw_x, raw_y, mx, my, state);
+            if ((evt == 0 || evt == 2) && state == ST_QUESTION && btn_yes >= 0) {
+                int hby = h / 2 + 65;
+                hover = bs_frame_hit(&ui, 8, btn_yes, hby, mx, my) ? 1 :
+                        bs_frame_hit(&ui, 8, btn_no, hby, mx, my) ? 2 : 0;
+            }
             if (evt == 0) { down_x = mx; down_y = my; }
             else if (evt == 1) {
                 // a tap = a click if it did not move much
@@ -641,11 +692,15 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                 if (down_x >= 0 && dx * dx + dy * dy < 30 * 30) {
                     if (state == ST_LOGO) state = ST_QUESTION;
                     else if (state == ST_QUESTION) {
-                        if (btn_yes >= 0 && mx >= btn_yes && mx <= btn_yes + bs_frame_w(&ui, 8) &&
-                            my >= h / 2 + 65 && my <= h / 2 + 65 + bs_frame_h(&ui, 8)) {
+                        int by = h / 2 + 65;
+                        int hit_yes = btn_yes >= 0 && bs_frame_hit(&ui, 8, btn_yes, by, mx, my);
+                        int hit_no = btn_no >= 0 && bs_frame_hit(&ui, 8, btn_no, by, mx, my);
+                        if (install_debug)
+                            printf("[installer] click logical=(%d,%d) yes=%d no=%d centers=(%d,%d) y=%d\n",
+                                   mx, my, hit_yes, hit_no, btn_yes, btn_no, by);
+                        if (hit_yes) {
                             state = ST_DOWNLOAD; dl_phase = 1;
-                        } else if (btn_no >= 0 && mx >= btn_no && mx <= btn_no + bs_frame_w(&ui, 8) &&
-                                   my >= h / 2 + 65 && my <= h / 2 + 65 + bs_frame_h(&ui, 8)) {
+                        } else if (hit_no) {
                             running = 0;
                         }
                     } else if (state == ST_SUCCESS) state = ST_DONE;
@@ -754,7 +809,9 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
         }
 
         // ---------------- render
-        glViewport(0, 0, w, h);
+        int vx = 0, vy = 0, vw = 0, vh = 0;
+        install_view_rect(w, h, &vx, &vy, &vw, &vh);
+        glViewport(vx, vy, vw, vh);
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         glOrtho(0, w, h, 0, -1, 1);
@@ -778,9 +835,8 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                                 S_SUCCESS;
             font_draw(&font, title, w / 2, (h / 2) + 30 - bs_frame_h(&ui, 7) / 2 + 40, 1, w - (w >> 2));
             if (state == ST_QUESTION) {
-                int fw = bs_frame_w(&ui, 8);
-                btn_yes = (w / 3) - fw / 2;
-                btn_no = ((w / 3) * 2) - fw / 2 - 40;
+                btn_yes = w / 3;
+                btn_no = (w / 3) * 2;
                 int by = (h / 2) + 65;
                 bs_draw_frame(&ui, hover == 1 ? 9 : 8, btn_yes, by);
                 font_draw(&font, S_YES, btn_yes, by, 1, 0);
@@ -801,7 +857,10 @@ int a5install_run(const char* game_dir, const char* master, int w, int h) {
                 if (level > fw) level = fw;
                 if (level < 0) level = 0;
                 glEnable(GL_SCISSOR_TEST);
-                glScissor(bx, h - (by + fh), level, fh);
+                glScissor(vx + (int)((long long)bx * vw / w),
+                          vy + (int)((long long)(h - (by + fh)) * vh / h),
+                          (int)((long long)level * vw / w),
+                          (int)((long long)fh * vh / h));
                 bs_draw_frame(&ui, 3, bx - 2 - (fw - level), by);
                 glDisable(GL_SCISSOR_TEST);
                 bs_draw_frame(&ui, 5, bx - 2 + level, by);
