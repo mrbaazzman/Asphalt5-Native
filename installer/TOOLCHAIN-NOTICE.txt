@@ -1,0 +1,18 @@
+MinGW-w64 GCC toolchain notice
+==============================
+
+This package contains a minimal MinGW-w64 GCC toolchain (GCC 16.2.0, built by
+WinLibs) used only to compile the C generated from the user's own APK.
+
+GCC is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version.
+
+  - GPL-3.0.txt in the builder package contains the full license text.
+  - The runtime libraries are covered by the GCC Runtime Library Exception;
+    see COPYING.RUNTIME in the GCC source tree.
+  - GCC sources: https://gcc.gnu.org/
+  - Windows build: https://winlibs.com/
+
+The toolchain is used unmodified.  The installer does not redistribute the
+game or any game-derived code.

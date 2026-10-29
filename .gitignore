@@ -1,58 +1,34 @@
-# Build outputs
+# Build output
 /build/
 /dist/
-/public/
-/release/
-/release_payload/
-/work/
-/saves/
-/sdcard/
-/data/
-/port/a5host/build*/
-/port/a5host/assets/
-
-# Game files, binaries, data packs (never commit)
-*.apk
-*.obb
-*.so
-*.dll
+/build-*/
+/cmake-build-*/
 *.exe
-*.rgba
-*.bmp
-*.zip
-analysis/apk/
-analysis/rea/
-analysis/jadx-out/
-analysis/backup_split/
-analysis/autogen/*.inc
-analysis/autogen/*.log
-analysis/autogen/list_all.txt
-analysis/autogen/list_before_all.txt
-analysis/autogen/autogens_all.inc
-port/a5host/src/host/autogen_api.h
-port/a5host/src/host/autogen_part_*.c
-port/a5host/src/host/autogens.inc
-port/a5host/src/host/autogens_1k.inc
-
-# Logs / captures / diagnostics
+*.dll
+*.lib
+*.a
+*.o
+*.obj
+*.pdb
+/asphalt5.log
 *.log
-a5host_status.txt
-cam_debug.log
-crash.log
-pause_watch.log
-dist_smoke*.txt
-pvrab*
-alpha4*
-Asphalt 5 3.4.1.apk
 
-# Python / editors / OS
+# User-supplied game files
+/original/
+/assets/
+/GloftA5HD/
+
+# Local scratch and captures
+/work/
+
+# Python
 __pycache__/
-*.py[cod]
-.venv/
+*.pyc
+
+# Editors / OS
 .vs/
 .vscode/
-.idea/
-*.suo
-*.user
+*.swp
+*~
 Thumbs.db
-desktop.ini
+Desktop.ini

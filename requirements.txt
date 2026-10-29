@@ -1,5 +1,5 @@
 capstone>=5.0
 Pillow>=10.0
 pyelftools>=0.30
-# Only needed to build the end-user one-file setup:
+# Optional, only for building the one-file setup:
 pyinstaller>=6.0
