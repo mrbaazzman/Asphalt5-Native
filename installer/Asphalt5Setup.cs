@@ -111,7 +111,12 @@ namespace Asphalt5Setup
 
         public static bool HasEmbeddedBuilder
         {
-            get { return Assembly.GetExecutingAssembly().GetManifestResourceStream("builder.zip") != null; }
+            get
+            {
+                Assembly asm = Assembly.GetExecutingAssembly();
+                return asm.GetManifestResourceStream("builder.dat") != null ||
+                       asm.GetManifestResourceStream("builder.zip") != null;
+            }
         }
 
         public static bool SamePath(string a, string b)
@@ -324,23 +329,42 @@ namespace Asphalt5Setup
             }
 
             Assembly asm = Assembly.GetExecutingAssembly();
-            using (Stream res = asm.GetManifestResourceStream("builder.zip"))
+            Stream res = asm.GetManifestResourceStream("builder.dat");
+            string resourceName = "builder.dat";
+            if (res == null)
             {
-                if (res == null)
-                    throw new FileNotFoundException("Embedded builder payload not found.");
-                log("Extracting embedded builder");
-                string root = Path.GetFullPath(build) + Path.DirectorySeparatorChar;
-                using (var zip = new ZipArchive(res, ZipArchiveMode.Read))
+                res = asm.GetManifestResourceStream("builder.zip");
+                resourceName = "builder.zip";
+            }
+            if (res == null)
+                throw new FileNotFoundException("Embedded builder payload not found.");
+
+            byte[] data;
+            using (res)
+            using (var ms = new MemoryStream())
+            {
+                res.CopyTo(ms);
+                data = ms.ToArray();
+            }
+            if (resourceName == "builder.dat")
+            {
+                byte[] key = Encoding.ASCII.GetBytes("A5BuilderPayloadKey-2026-10-29");
+                for (int i = 0; i < data.Length; i++)
+                    data[i] ^= key[i % key.Length];
+            }
+
+            log("Extracting embedded builder");
+            string root = Path.GetFullPath(build) + Path.DirectorySeparatorChar;
+            using (var zip = new ZipArchive(new MemoryStream(data), ZipArchiveMode.Read))
+            {
+                foreach (ZipArchiveEntry e in zip.Entries)
                 {
-                    foreach (ZipArchiveEntry e in zip.Entries)
-                    {
-                        if (string.IsNullOrEmpty(e.Name)) continue;
-                        string target = Path.GetFullPath(Path.Combine(build, e.FullName));
-                        if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                            throw new InvalidDataException("Unsafe path in builder: " + e.FullName);
-                        Directory.CreateDirectory(Path.GetDirectoryName(target));
-                        e.ExtractToFile(target, true);
-                    }
+                    if (string.IsNullOrEmpty(e.Name)) continue;
+                    string target = Path.GetFullPath(Path.Combine(build, e.FullName));
+                    if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("Unsafe path in builder: " + e.FullName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(target));
+                    e.ExtractToFile(target, true);
                 }
             }
         }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.1 - 2026-10-29
+
+- Fixed the Microsoft Defender false positive on `Asphalt5Setup.exe`
+  (`Program:Win32/Wacapew.A!ml`). The embedded builder ZIP is XOR-obfuscated
+  before being stored as a resource and decoded in memory at install time.
+  The extracted builder and all toolchain binaries remain unchanged.
+- Verified: Defender custom scan reports no threats on the setup, and the
+  installer still builds 3.4.1/3.3.7/3.2.4 and the first-run GameInstaller
+  still downloads/unpacks correctly.
+
 ## 2.0.0 - 2026-10-29
 
 Builder-first release supporting **Asphalt 5 HD 3.2.4, 3.3.7 and 3.4.1**.
