@@ -19,6 +19,13 @@
   clicking the Controls row opens the mapper without breaking the car-options
   Window Tint row. DirectInput is loaded dynamically and the builder includes
   the small import libraries it needs.
+- Fixed the 854x480 Controls-page row geometry used by 3.2.4 and 3.4.1, so
+  a click on CONFIGURE INPUT is recognised every time instead of falling
+  through to the stock control-scheme toggle.
+- Guarded the stock Controls-row `DoAction`: the release that follows the
+  opening click no longer cycles ACCELEROMETER/BUTTONS behind the overlay.
+- Restored the previous texture binding and current colour after drawing the
+  overlay, so mapper drawing cannot change the game's texture state.
 - Tested on 3.2.4, 3.3.7 and 3.4.1: overlay opens from F1 and the Controls
   page, keyboard capture updates the cell and `input.ini`, and the binding
   persists across restarts.

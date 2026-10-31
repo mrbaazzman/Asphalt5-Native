@@ -250,10 +250,10 @@ namespace Asphalt5Setup
                 patched += PatchGenerated(chunk, profile, out changed);
                 rewritten += changed;
             }
-            if (patched != 10)
+            if (patched != 11)
                 throw new InvalidOperationException(
-                    "Runtime patch targets missing (" + patched + "/10).");
-            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit/input patches (" + patched + "/10, " +
+                    "Runtime patch targets missing (" + patched + "/11).");
+            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit/input patches (" + patched + "/11, " +
                 rewritten + " rewritten)");
 
             progress("Compiling the game (this can take 10-20 minutes)...", 40);
@@ -584,7 +584,7 @@ namespace Asphalt5Setup
             return sb.ToString();
         }
 
-        /* Returns how many of the ten patch targets occur in this chunk;
+        /* Returns how many of the eleven patch targets occur in this chunk;
          * changed receives how many were actually rewritten.  The patch
          * targets can land in different functions_NN.c files. */
         private static int PatchGenerated(string path, ApkProfile profile, out int changed)
@@ -595,7 +595,7 @@ namespace Asphalt5Setup
             int found = 0;
             changed = 0;
             string[] cm;
-            string nitro, rotation, exit, labelFn, clickFn;
+            string nitro, rotation, exit, labelFn, clickFn, actionFn;
             int c;
             if (profile.Is341)
             {
@@ -606,6 +606,7 @@ namespace Asphalt5Setup
                 exit = "fn_00063bf4";
                 labelFn = "fn_000eecc8";
                 clickFn = "fn_000ee734";
+                actionFn = "fn_000ee5fc";
             }
             else if (profile.Is337)
             {
@@ -616,6 +617,7 @@ namespace Asphalt5Setup
                 exit = "fn_00082b08";
                 labelFn = "fn_000ef450";
                 clickFn = "fn_000eeebc";
+                actionFn = "fn_000eed80";
             }
             else
             {
@@ -626,6 +628,7 @@ namespace Asphalt5Setup
                 exit = "fn_00097a04";
                 labelFn = "fn_00104524";
                 clickFn = "fn_00103698";
+                actionFn = "fn_0010359c";
             }
             string[] cmWhy = new string[]
             {
@@ -667,6 +670,11 @@ namespace Asphalt5Setup
                               "Input mapper Controls row click.",
                               "guest_control_menu_click");
             if (rb > 0) { found++; if (rb == 1) changed++; }
+            int ra = PatchOne(ref s, actionFn,
+                              "if (guest_control_menu_action(cpu)) return;",
+                              "Input mapper Controls row action guard.",
+                              "guest_control_menu_action");
+            if (ra > 0) { found++; if (ra == 1) changed++; }
             if (changed > 0) File.WriteAllText(path, s);
             return found;
         }

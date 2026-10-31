@@ -112,8 +112,11 @@ void gl_CompressedTexImage2D(CPU *c)
     uint32_t data = stack_arg(c, 3);
     if (fmt == GL_ETC1_RGB8_OES || (fmt >= 0x8C00 && fmt <= 0x8C03)) {
         static int warned;
-        if (!warned++) fprintf(stderr, "[gl] compressed texture format %04x (%ux%u) not decoded yet\n",
-                               fmt, w, h);
+        if (!warned++) {
+            fprintf(stderr, "[gl] compressed texture format %04x (%ux%u) not decoded yet\n",
+                    fmt, w, h);
+            fflush(stderr);
+        }
         return;
     }
     pglCompressedTexImage2D((GLenum)A(0), (GLint)A(1), fmt, w, h, border, size,

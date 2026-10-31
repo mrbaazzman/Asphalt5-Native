@@ -1065,7 +1065,16 @@ void guest_string_override(CPU *cpu)
 
 int guest_control_menu_action(CPU *cpu)
 {
-    menu_log("[menu] do r1=%x r2=%x", cpu->r[1], cpu->r[2]);
+    menu_log("[menu] do r1=%x r2=%x open=%d req=%d label=%d",
+             cpu->r[1], cpu->r[2], g_open, g_open_requested, g_controls_label);
+    /* Index 6 is the Controls row (five OPTIONS tabs plus Auto
+     * Accelerate).  The engine calls DoAction on release; without this
+     * guard that release cycles the control scheme after the mapper has
+     * already opened. */
+    if (g_controls_label && (g_open || g_open_requested) && cpu->r[1] == 6) {
+        menu_log("[menu] suppressed Controls row action");
+        return 1;
+    }
     return 0;
 }
 
@@ -1076,6 +1085,7 @@ int guest_control_menu_bar_action(CPU *cpu)
 }
 
 int platform_last_touch(int *x, int *y);
+int platform_last_click(int *x, int *y);
 void platform_cancel_mouse(void);
 
 static int menu_row_at(void)
@@ -1083,20 +1093,37 @@ static int menu_row_at(void)
     POINT p;
     RECT rc;
     int w, h, lw, lh, lx = -1, ly = -1;
-    if (!platform_last_touch(&lx, &ly)) {
+    lw = platform_logical_width();
+    lh = platform_logical_height();
+    if (lw < 1 || lh < 1) return -1;
+    if (platform_last_click(&lx, &ly)) {
+        if (!g_host || !GetClientRect(g_host, &rc)) return -1;
+        w = rc.right - rc.left;
+        h = rc.bottom - rc.top;
+        if (w < 1 || h < 1) return -1;
+        lx = lx * lw / w;
+        ly = ly * lh / h;
+    } else if (platform_last_touch(&lx, &ly)) {
+        /* RECOMP_TAP / synthetic touch path. */
+    } else {
         if (!g_host || !GetCursorPos(&p) || !ScreenToClient(g_host, &p)) return -1;
         if (!GetClientRect(g_host, &rc)) return -1;
         w = rc.right - rc.left;
         h = rc.bottom - rc.top;
-        lw = platform_logical_width();
-        lh = platform_logical_height();
-        if (w < 1 || h < 1 || lw < 1 || lh < 1) return -1;
+        if (w < 1 || h < 1) return -1;
         lx = p.x * lw / w;
         ly = p.y * lh / h;
     }
-    lw = platform_logical_width();
-    lh = platform_logical_height();
-    if (lw < 1 || lh < 1) return -1;
+    if (lh <= 500) {
+        /* 3.2.4 / 3.4.1 use the 854x480 UI.  The three Controls rows sit at
+         * roughly 30%, 50% and 70% of the logical height there, not at the
+         * 3.3.7 percentages. */
+        if (lx < lw * 15 / 100 || lx > lw * 70 / 100) return -1;
+        if (ly >= lh * 20 / 100 && ly < lh * 38 / 100) return 0;
+        if (ly >= lh * 40 / 100 && ly < lh * 60 / 100) return 1;
+        if (ly >= lh * 62 / 100 && ly < lh * 80 / 100) return 2;
+        return -1;
+    }
     if (lx < lw * 22 / 100 || lx > lw * 66 / 100) return -1;
     if (ly >= lh * 18 / 100 && ly < lh * 30 / 100) return 0;
     if (ly >= lh * 31 / 100 && ly < lh * 45 / 100) return 1;
@@ -1108,9 +1135,12 @@ static void request_open(void);
 
 int guest_control_menu_click(CPU *cpu)
 {
-    int row;
+    int row, tx = -1, ty = -1;
     (void)cpu;
+    platform_last_touch(&tx, &ty);
     row = menu_row_at();
+    menu_log("[hook] touch=%d,%d row=%d label=%d open=%d req=%d", tx, ty, row,
+             g_controls_label, g_open, g_open_requested);
     if (row == 1 && g_controls_label) {
         request_open();
         return 1;
@@ -1193,6 +1223,7 @@ static int ui_rect(RECT *r)
 
 static void destroy_surface(void)
 {
+    if (g_tex) { glDeleteTextures(1, &g_tex); g_tex = 0; }
     if (g_memdc) { DeleteDC(g_memdc); g_memdc = NULL; }
     if (g_bmp) { DeleteObject(g_bmp); g_bmp = NULL; }
     g_pixels = NULL;
@@ -1545,6 +1576,10 @@ void input_map_draw(void)
         }
     }
 
+    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+                 GL_VIEWPORT_BIT | GL_TRANSFORM_BIT | GL_TEXTURE_BIT |
+                 GL_SCISSOR_BIT | GL_CURRENT_BIT);
+    glPushClientAttrib(GL_CLIENT_PIXEL_STORE_BIT);
     if (!g_tex) glGenTextures(1, &g_tex);
     if (g_tex_dirty && g_tex) {
         glBindTexture(GL_TEXTURE_2D, g_tex);
@@ -1557,10 +1592,6 @@ void input_map_draw(void)
                      GL_BGRA_EXT, GL_UNSIGNED_BYTE, g_pixels);
         g_tex_dirty = 0;
     }
-
-    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
-                 GL_VIEWPORT_BIT | GL_TRANSFORM_BIT | GL_TEXTURE_BIT |
-                 GL_SCISSOR_BIT);
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glDisable(GL_BLEND);
@@ -1584,6 +1615,7 @@ void input_map_draw(void)
     glMatrixMode(GL_PROJECTION);
     glPopMatrix();
     glMatrixMode(GL_MODELVIEW);
+    glPopClientAttrib();
     glPopAttrib();
 }
 

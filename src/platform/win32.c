@@ -161,6 +161,9 @@ static void control_mode_set(int v)
     wr8(CONTROL_MODE_ADDR, (uint32_t)v);
 }
 
+void platform_note_click(int x, int y);
+int platform_last_click(int *x, int *y);
+
 static int g_race_now;
 static int g_mouse_release_wait;
 static int g_compact_wait;
@@ -751,6 +754,8 @@ static void release_race_inputs(void)
 
 LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (msg == WM_LBUTTONDOWN && !input_map_overlay_open())
+        platform_note_click((int)(short)LOWORD(lp), (int)(short)HIWORD(lp));
     if (input_map_handle_message(h, msg, wp, lp))
         return 0;
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_F1 &&
@@ -1266,6 +1271,23 @@ void platform_note_touch(int x, int y)
     g_last_touch_x = x;
     g_last_touch_y = y;
     g_last_touch_valid = 1;
+}
+
+static int g_last_click_x, g_last_click_y, g_last_click_valid;
+
+void platform_note_click(int x, int y)
+{
+    g_last_click_x = x;
+    g_last_click_y = y;
+    g_last_click_valid = 1;
+}
+
+int platform_last_click(int *x, int *y)
+{
+    if (!g_last_click_valid) return 0;
+    if (x) *x = g_last_click_x;
+    if (y) *y = g_last_click_y;
+    return 1;
 }
 
 int platform_last_touch(int *x, int *y)
