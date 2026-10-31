@@ -4,6 +4,7 @@
 
 #include "gl/gl_internal.h"
 #include "audio.h"
+#include "input_map.h"
 #include <xinput.h>
 
 
@@ -161,6 +162,7 @@ static void control_mode_set(int v)
 }
 
 static int g_race_now;
+static int g_mouse_release_wait;
 static int g_compact_wait;
 static int g_saved_control_mode = -1;
 static int g_control_entered;
@@ -498,6 +500,50 @@ static void nitro_up(void)
         fprintf(stderr, "[input] nitro up %d,%d\n", g_nitro_x, g_nitro_y);
 }
 
+int host_game_in_race(void)
+{
+    return game_in_race();
+}
+
+int host_pause_context(void)
+{
+    return game_in_race() || pause_menu_active();
+}
+
+void host_input_action(int act, int down, unsigned src)
+{
+    switch (act) {
+    case HACT_STEER_L:
+        if (down) action_down_src(ACT_STEER_L, src);
+        else action_up_src(ACT_STEER_L, src);
+        break;
+    case HACT_STEER_R:
+        if (down) action_down_src(ACT_STEER_R, src);
+        else action_up_src(ACT_STEER_R, src);
+        break;
+    case HACT_BRAKE:
+        if (down) action_down_src(ACT_BRAKE, src);
+        else action_up_src(ACT_BRAKE, src);
+        break;
+    case HACT_ACCEL:
+        if (down) action_down_src(ACT_ACCEL, src);
+        else action_up_src(ACT_ACCEL, src);
+        break;
+    case HACT_NITRO:
+        if (down) nitro_down();
+        else nitro_up();
+        break;
+    case HACT_CAMERA:
+        if (down && game_in_race()) cycle_camera();
+        break;
+    case HACT_PAUSE:
+        if (down) pause_toggle();
+        break;
+    default:
+        break;
+    }
+}
+
 int platform_buttons_mode(void)
 {
     return g_control_entered;   /* the forced in-race buttons layout */
@@ -705,6 +751,13 @@ static void release_race_inputs(void)
 
 LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
+    if (input_map_handle_message(h, msg, wp, lp))
+        return 0;
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_F1 &&
+        !(lp & (1 << 30))) {
+        input_map_toggle();
+        return 0;
+    }
     switch (msg) {
     case WM_CLOSE:
         DestroyWindow(h);
@@ -726,38 +779,12 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             return DefWindowProcA(h, msg, wp, lp);
         int ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
         if (ctrl && wp == 'Q') { g_quit = 1; DestroyWindow(h); return 0; }
-        switch (wp) {
-        case VK_LEFT:  action_down(ACT_STEER_L); break;
-        case VK_RIGHT: action_down(ACT_STEER_R); break;
-        case 'A':      action_down(ACT_STEER_L); break;
-        case 'D':      action_down(ACT_STEER_R); break;
-        case VK_UP:    action_down(ACT_ACCEL);   break;
-        case 'W':      action_down(ACT_ACCEL);   break;
-        case VK_DOWN:  action_down(ACT_BRAKE);   break;
-        case 'S':      action_down(ACT_BRAKE);   break;
-        case VK_SPACE: nitro_down();              break;
-        case 'C':      if (g_race_now) cycle_camera(); break;
-        case VK_ESCAPE:
-            pause_toggle();
-            break;
-        }
+        /* Race bindings are polled by the input mapper; the menu is mouse
+         * driven, so there are no fixed key actions left here. */
         return 0;
     }
     case WM_KEYUP:
     case WM_SYSKEYUP:
-        switch (wp) {
-        case VK_LEFT:  action_up(ACT_STEER_L); break;
-        case VK_RIGHT: action_up(ACT_STEER_R); break;
-        case 'A':      action_up(ACT_STEER_L); break;
-        case 'D':      action_up(ACT_STEER_R); break;
-        case VK_UP:    action_up(ACT_ACCEL);   break;
-        case 'W':      action_up(ACT_ACCEL);   break;
-        case VK_DOWN:  action_up(ACT_BRAKE);   break;
-        case 'S':      action_up(ACT_BRAKE);   break;
-        case VK_SPACE: nitro_up();              break;
-        case VK_ESCAPE:
-            break;
-        }
         return 0;
     case WM_KILLFOCUS:
         action_release_all();
@@ -839,6 +866,7 @@ int platform_init(int width, int height)
         ShowWindow(g_hwnd, SW_SHOW);
         UpdateWindow(g_hwnd);
     }
+    input_map_init(g_hwnd);
     fprintf(stderr, "[win] %dx%d client, GL %s\n", width, height,
             (const char *)glGetString(GL_VERSION));
     return 0;
@@ -1051,6 +1079,9 @@ void platform_pump(void)
         DispatchMessageA(&msg);
     }
     if (!g_cpu) return;
+    input_map_pump();
+    if (input_map_overlay_open())
+        return;                 /* the mapper owns mouse and keyboard */
     vox_audio_pump();
 
     /* Race input: the game's own "buttons" control mode, restored outside a
@@ -1087,7 +1118,6 @@ void platform_pump(void)
     }
     if (!race && g_compact_wait > 0 && --g_compact_wait == 0)
         guest_heap_compact();
-    gamepad_poll();
 
     POINT p;
     int have = 0, gx = 0, gy = 0;
@@ -1098,6 +1128,13 @@ void platform_pump(void)
     }
 
     int down = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+
+    if (g_mouse_release_wait) {
+        g_mouse_down = 0;
+        if (!down) g_mouse_release_wait = 0;
+        if (race) host_pad_sync();
+        return;
+    }
 
     if (race) {
         int inside = have && gx >= 0 && gx <= 853 && gy >= 0 && gy <= 479;
@@ -1156,6 +1193,7 @@ void platform_swap(void)
 {
     g_draw_serial = 0;
     g_swap_count++;
+    input_map_draw();
     capture_frame();
     scene_dump();
     if (g_hdc && g_hrc) SwapBuffers(g_hdc);
@@ -1215,9 +1253,33 @@ int platform_client_width(void) { return g_client_w; }
 int platform_client_height(void) { return g_client_h; }
 
 
+static int g_last_touch_x, g_last_touch_y, g_last_touch_valid;
+
+void platform_cancel_mouse(void)
+{
+    g_mouse_down = 0;
+    g_mouse_release_wait = 1;
+}
+
+void platform_note_touch(int x, int y)
+{
+    g_last_touch_x = x;
+    g_last_touch_y = y;
+    g_last_touch_valid = 1;
+}
+
+int platform_last_touch(int *x, int *y)
+{
+    if (!g_last_touch_valid) return 0;
+    if (x) *x = g_last_touch_x;
+    if (y) *y = g_last_touch_y;
+    return 1;
+}
+
 void touch(const char *sym, int x, int y, int id)
 {
     if (!g_cpu) return;
+    platform_note_touch(x, y);
     uint32_t a = guest_symbol(sym);
     if (!a) return;
     g_cpu->r[0] = (uint32_t)x; g_cpu->r[1] = (uint32_t)y; g_cpu->r[2] = (uint32_t)id;

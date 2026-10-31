@@ -250,10 +250,10 @@ namespace Asphalt5Setup
                 patched += PatchGenerated(chunk, profile, out changed);
                 rewritten += changed;
             }
-            if (patched != 8)
+            if (patched != 10)
                 throw new InvalidOperationException(
-                    "Runtime patch targets missing (" + patched + "/8).");
-            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit patches (" + patched + "/8, " +
+                    "Runtime patch targets missing (" + patched + "/10).");
+            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit/input patches (" + patched + "/10, " +
                 rewritten + " rewritten)");
 
             progress("Compiling the game (this can take 10-20 minutes)...", 40);
@@ -578,15 +578,15 @@ namespace Asphalt5Setup
 
             sb.Append("-o \"").Append(outExe).Append("\" ");
             sb.Append("-lopengl32 -lgdi32 -luser32 -lwinmm -lws2_32 -lm " +
-                      "-lmfreadwrite -lmfplat -lmfuuid -lole32 -luuid ");
+                      " -ldinput8 -ldxguid -lmfreadwrite -lmfplat -lmfuuid -lole32 -luuid ");
             if (profile.UsesInstaller) sb.Append("-lwininet -lbcrypt -lcomctl32 -lcomdlg32 ");
             sb.Append("-mwindows");
             return sb.ToString();
         }
 
-        /* Returns how many of the eight patch targets occur in this chunk;
-         * changed receives how many were actually rewritten.  The eight
-         * functions can land in different functions_NN.c files. */
+        /* Returns how many of the ten patch targets occur in this chunk;
+         * changed receives how many were actually rewritten.  The patch
+         * targets can land in different functions_NN.c files. */
         private static int PatchGenerated(string path, ApkProfile profile, out int changed)
         {
             // The translator writes CRLF on Windows; normalise so the prologue
@@ -595,7 +595,7 @@ namespace Asphalt5Setup
             int found = 0;
             changed = 0;
             string[] cm;
-            string nitro, rotation, exit;
+            string nitro, rotation, exit, labelFn, clickFn;
             int c;
             if (profile.Is341)
             {
@@ -604,6 +604,8 @@ namespace Asphalt5Setup
                 nitro = "fn_0015688c";
                 rotation = "fn_0009a118";
                 exit = "fn_00063bf4";
+                labelFn = "fn_000eecc8";
+                clickFn = "fn_000ee734";
             }
             else if (profile.Is337)
             {
@@ -612,6 +614,8 @@ namespace Asphalt5Setup
                 nitro = "fn_0015704c";
                 rotation = "fn_000bde00";
                 exit = "fn_00082b08";
+                labelFn = "fn_000ef450";
+                clickFn = "fn_000eeebc";
             }
             else
             {
@@ -620,6 +624,8 @@ namespace Asphalt5Setup
                 nitro = "fn_0016e384";
                 rotation = "fn_000d15b8";
                 exit = "fn_00097a04";
+                labelFn = "fn_00104524";
+                clickFn = "fn_00103698";
             }
             string[] cmWhy = new string[]
             {
@@ -651,6 +657,16 @@ namespace Asphalt5Setup
                               "Host exit for the in-game Exit item.",
                               "platform_request_exit");
             if (re > 0) { found++; if (re == 1) changed++; }
+            int rl = PatchOne(ref s, labelFn,
+                              "if (guest_control_menu_label(cpu)) return;",
+                              "Input mapper Controls row label.",
+                              "guest_control_menu_label");
+            if (rl > 0) { found++; if (rl == 1) changed++; }
+            int rb = PatchOne(ref s, clickFn,
+                              "if (guest_control_menu_click(cpu)) return;",
+                              "Input mapper Controls row click.",
+                              "guest_control_menu_click");
+            if (rb > 0) { found++; if (rb == 1) changed++; }
             if (changed > 0) File.WriteAllText(path, s);
             return found;
         }

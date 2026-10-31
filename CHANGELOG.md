@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.2.0 - 2026-10-31
+
+- Added the PC input mapper. Open it with **F1** or **OPTIONS -> CONTROLS ->
+  CONFIGURE INPUT**, then click a keyboard or controller cell and press the
+  key, button or axis you want. Bindings save immediately.
+- Supports keyboard, XInput controllers and generic DirectInput controllers,
+  wheels, pedals and joysticks. Axes and POV hats can be bound as well as
+  buttons.
+- Seven actions can be rebound: steer left/right, accelerate, brake, nitro,
+  camera and pause. A binding can be cleared with Delete; Reset Defaults and
+  Done are in the overlay. The stock Controls rows are left untouched.
+- Bindings are stored in `%LOCALAPPDATA%\Asphalt5\input.ini`; the file is
+  created with defaults on first launch.
+- The overlay owns the mouse and keyboard while open, so clicking a binding
+  no longer toggles Auto Accelerate or changes stock options underneath.
+- The setup now uses a touch-coordinate row test and a page discriminator, so
+  clicking the Controls row opens the mapper without breaking the car-options
+  Window Tint row. DirectInput is loaded dynamically and the builder includes
+  the small import libraries it needs.
+- Tested on 3.2.4, 3.3.7 and 3.4.1: overlay opens from F1 and the Controls
+  page, keyboard capture updates the cell and `input.ini`, and the binding
+  persists across restarts.
+
 ## 2.1.0 - 2026-10-31
 
 - PC quality-of-life: the phone's on-screen brake/pedal and nitro buttons are

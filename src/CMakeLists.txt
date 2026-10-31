@@ -16,6 +16,7 @@ add_library(asphalt5_core STATIC
   core/imports.c
   core/jni.c
   platform/win32.c
+  platform/input_map.c
   platform/audio.c
   platform/stb_vorbis.c
   platform/movie.c
@@ -51,7 +52,7 @@ set(ASPHALT5_WARNINGS
 
 target_compile_options(asphalt5_core PRIVATE ${ASPHALT5_WARNINGS})
 target_link_libraries(asphalt5_core PUBLIC
-  ws2_32 opengl32 winmm user32 gdi32 m
+  ws2_32 opengl32 winmm user32 gdi32 m dinput8 dxguid
   mfreadwrite mfplat mfuuid ole32 uuid)
 
 # Console development tool: crc32 oracle, matrix tests, boot with logs.

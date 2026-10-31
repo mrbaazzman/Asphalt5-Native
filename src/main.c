@@ -519,9 +519,12 @@ static int run_mtxtest(const char *so)
     return 0;
 }
 
+extern void platform_note_touch(int x, int y);
+
 static void touch_guest(CPU *c, const char *name, int x, int y, int id)
 {
     uint32_t a = guest_symbol(name);
+    platform_note_touch(x, y);
     if (!a) return;
     c->r[0] = (uint32_t)x; c->r[1] = (uint32_t)y; c->r[2] = (uint32_t)id;
     c->r[14] = 0;

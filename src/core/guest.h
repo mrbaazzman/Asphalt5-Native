@@ -446,6 +446,21 @@ void platform_swap(void);
 int  platform_should_close(void);
 int  platform_client_width(void);
 int  platform_client_height(void);
+int  platform_logical_width(void);
+int  platform_logical_height(void);
+
+/* Host hooks for the engine's controls page. */
+int  guest_control_menu_label(CPU *cpu);
+int  guest_control_menu_action(CPU *cpu);
+int  guest_control_menu_bar_action(CPU *cpu);
+int  guest_control_menu_click(CPU *cpu);
+void guest_string_override(CPU *cpu);
+void guest_controls_page_tick(void);
+void guest_clear_controls_page(CPU *cpu);
+void guest_log_menu(CPU *cpu);
+int  guest_controls_render_begin(CPU *cpu);
+void guest_record_row(CPU *cpu);
+void guest_debug_menu(CPU *cpu);
 int  gles1_dispatch(CPU *cpu, const char *name);
 uint64_t gles1_draws(void);
 uint64_t gles1_clears(void);

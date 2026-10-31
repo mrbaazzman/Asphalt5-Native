@@ -67,10 +67,20 @@ Notes
 Controls
 --------
 Menus       mouse click
+Input map   F1, or OPTIONS > CONTROLS > CONFIGURE INPUT
 Race        left/right mouse halves steer; pedals brake; N fires nitro
 Keyboard    arrows or A/D steer, W/S accelerate/brake, Space nitro,
             C camera, Esc pause/resume, Ctrl+Q quit
 Movies      click or Esc to skip
+
+Input mapper
+------------
+The mapper is a host-drawn overlay; the stock Controls page is not changed.
+Click any row or cell and press a key, XInput button/axis, or DirectInput
+button/axis. Use the keyboard or controller column to choose the device.
+Delete clears a binding, Reset Defaults restores the stock layout, and
+Esc/F1 closes. Changes save to %LOCALAPPDATA%\Asphalt5\input.ini and are
+loaded on the next launch.
 
 The phone's on-screen touch buttons are hidden during races. Mouse zones,
 keyboard and gamepad controls above still work. Set RECOMP_SHOW_TOUCH=1 to
