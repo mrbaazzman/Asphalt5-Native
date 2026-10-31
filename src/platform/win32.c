@@ -152,6 +152,14 @@ int platform_control_mode_bypass(void)
     return g_control_mode_bypass;
 }
 
+int platform_set_auto_accelerate(int v)
+{
+    uint32_t obj = game_settings_addr();
+    if (!obj) return 0;
+    wr8(obj + 0xcu, v ? 1 : 0);
+    return 1;
+}
+
 static void control_mode_set(int v)
 {
     uint32_t obj = game_settings_addr();
@@ -172,6 +180,7 @@ static void control_mode_set(int v)
 
 void platform_note_click(int x, int y);
 int platform_last_click(int *x, int *y);
+int input_map_auto_accelerate(void);
 
 static int g_race_now;
 static int g_mouse_release_wait;
@@ -1118,8 +1127,11 @@ void platform_pump(void)
         g_saved_control_mode = 2;
         {
             static unsigned force_tick;
-            if ((force_tick++ % 30) == 0 && control_mode_get() != 2)
-                control_mode_set(2);
+            if ((force_tick++ % 30) == 0) {
+                if (control_mode_get() != 2)
+                    control_mode_set(2);
+                platform_set_auto_accelerate(input_map_auto_accelerate());
+            }
         }
     }
     if (race != g_race_now) {

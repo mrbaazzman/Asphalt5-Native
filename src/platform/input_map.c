@@ -60,6 +60,7 @@ static int g_open, g_open_requested;
 static int g_embedded, g_controls_seen, g_controls_active;
 static int g_remap_page, g_remap_action;
 static int g_controls_label;
+static int g_auto_accelerate = 1;
 static int g_capture, g_cap_act, g_cap_cat, g_cap_wait_release;
 static uint32_t g_label_guest[3];
 static int g_selected, g_col;
@@ -416,6 +417,10 @@ static void load_config(void)
             }
             continue;
         }
+        if (strncmp(s, "auto_accelerate=", 16) == 0) {
+            g_auto_accelerate = atoi(s + 16) ? 1 : 0;
+            continue;
+        }
         if (section < 0) continue;
         val = strchr(s, '=');
         if (!val) continue;
@@ -493,7 +498,8 @@ static void save_config(void)
     f = fopen(tmp, "w");
     if (!f) return;
     fprintf(f, "# Asphalt 5 Native input mapping\n");
-    fprintf(f, "# key=..., xinput=any:Name, dinput={GUID}:button:N\n\n");
+    fprintf(f, "# key=..., xinput=any:Name, dinput={GUID}:button:N\n");
+    fprintf(f, "auto_accelerate=%d\n\n", g_auto_accelerate);
     for (int a = 0; a < ACT_COUNT; a++) {
         fprintf(f, "[%s]\n", act_section[a]);
         for (int cat = 0; cat < 2; cat++) {
@@ -1067,6 +1073,11 @@ static void request_open(void);
 
 int platform_control_mode_bypass(void);
 
+int input_map_auto_accelerate(void)
+{
+    return g_auto_accelerate;
+}
+
 int guest_force_control_mode(CPU *cpu)
 {
     if (platform_control_mode_bypass()) return 0;
@@ -1099,6 +1110,7 @@ int guest_control_menu_bar_action(CPU *cpu)
 
 int platform_last_touch(int *x, int *y);
 int platform_last_click(int *x, int *y);
+int platform_set_auto_accelerate(int v);
 void platform_cancel_mouse(void);
 
 static int menu_row_at(void)
@@ -1165,6 +1177,12 @@ int guest_control_menu_click(CPU *cpu)
     row = menu_row_at();
     menu_log("[hook] touch=%d,%d row=%d label=%d open=%d req=%d", tx, ty, row,
              g_controls_label, g_open, g_open_requested);
+    if (row == 0 && g_controls_label) {
+        g_auto_accelerate = !g_auto_accelerate;
+        platform_set_auto_accelerate(g_auto_accelerate);
+        save_config();
+        return 1;
+    }
     if (row == 1 && g_controls_label) {
         request_open();
         return 1;

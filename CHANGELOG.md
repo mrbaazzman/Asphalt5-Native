@@ -25,8 +25,9 @@
 - Guarded the stock Controls-row `DoAction`: the release that follows the
   opening click no longer cycles ACCELEROMETER/BUTTONS behind the overlay.
 - All builds now force the engine control scheme to Accelerometer. The stock
-  AUTO ACCELERATE row remains active, so it can still be switched on or off;
-  only the scheme toggle is replaced by the mapper entry.
+  AUTO ACCELERATE row remains active; the host toggles its setting directly
+  and saves the choice as `auto_accelerate=0/1` in `input.ini`, so it
+  survives a restart. Only the scheme toggle is replaced by the mapper entry.
 - Restored the previous texture binding and current colour after drawing the
   overlay, so mapper drawing cannot change the game's texture state.
 - Tested on 3.2.4, 3.3.7 and 3.4.1: overlay opens from F1 and the Controls
