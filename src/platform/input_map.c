@@ -65,7 +65,7 @@ static int g_capture, g_cap_act, g_cap_cat, g_cap_wait_release;
 static uint32_t g_label_guest[3];
 static int g_selected, g_col;
 static int g_hover_row = -1, g_hover_col = -1;
-static int g_hover_done, g_hover_reset;
+static int g_hover_done, g_hover_reset, g_hover_aa;
 static int g_input_armed = 1;
 
 static int g_prev[ACT_COUNT][2];
@@ -84,7 +84,7 @@ static int g_tex_dirty = 1;
 
 static RECT g_row[ACT_COUNT];
 static RECT g_cell_kb[ACT_COUNT], g_cell_pad[ACT_COUNT];
-static RECT g_reset, g_done;
+static RECT g_reset, g_done, g_aa_rect;
 static int g_capture_rect_valid;
 static RECT g_capture_rect;
 
@@ -1512,6 +1512,24 @@ static void compose(void)
         line(dc, pad_x - 23, y + 8, pad_x - 23, y + rh - 8, RGB(23, 75, 98), 1);
     }
 
+    {
+        int bw = w * 42 / 100;
+        int bh = h * 58 / 1000;
+        int bx = (w - bw) / 2;
+        int by = h * 710 / 1000;
+        char aa[64];
+        g_aa_rect.left = bx; g_aa_rect.top = by;
+        g_aa_rect.right = bx + bw; g_aa_rect.bottom = by + bh;
+        snprintf(aa, sizeof(aa), "AUTO ACCELERATE: %s",
+                 g_auto_accelerate ? "ON" : "OFF");
+        fill_rect(dc, bx, by, bw, bh,
+                  g_hover_aa ? RGB(29, 67, 96) : RGB(13, 38, 59));
+        frame_rect(dc, bx, by, bw, bh,
+                   g_hover_aa ? RGB(74, 238, 255) : RGB(31, 112, 140), 2);
+        draw_centered(dc, aa, by + bh / 2 - row_px / 2, row_px, 0,
+                      RGB(220, 238, 246), w, 0);
+    }
+
     if (g_capture) {
         const char *msg = g_cap_cat == 0 ?
             "PRESS A KEY  -  ESC CANCELS  -  DELETE CLEARS" :
@@ -1684,7 +1702,7 @@ static void overlay_open(void)
     g_col = 0;
     g_hover_row = -1;
     g_hover_col = -1;
-    g_hover_done = g_hover_reset = 0;
+    g_hover_done = g_hover_reset = g_hover_aa = 0;
     g_dirty = 1;
     create_surface(platform_client_width(), platform_client_height());
     menu_log("[overlay] open client=%dx%d surface=%dx%d", platform_client_width(), platform_client_height(), g_sw, g_sh);
@@ -1736,12 +1754,14 @@ static void update_hover(int x, int y)
     int row = hit_row(x, y, &col);
     int done = point_in(&g_done, x, y);
     int reset = point_in(&g_reset, x, y);
+    int aa = point_in(&g_aa_rect, x, y);
     if (row != g_hover_row || col != g_hover_col ||
-        done != g_hover_done || reset != g_hover_reset) {
+        done != g_hover_done || reset != g_hover_reset || aa != g_hover_aa) {
         g_hover_row = row;
         g_hover_col = col;
         g_hover_done = done;
         g_hover_reset = reset;
+        g_hover_aa = aa;
         g_dirty = 1;
     }
 }
@@ -1845,6 +1865,13 @@ int input_map_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (point_in(&g_done, x, y)) { overlay_close(); return 1; }
         if (point_in(&g_reset, x, y)) {
             defaults();
+            save_config();
+            g_dirty = 1;
+            return 1;
+        }
+        if (point_in(&g_aa_rect, x, y)) {
+            g_auto_accelerate = !g_auto_accelerate;
+            platform_set_auto_accelerate(g_auto_accelerate);
             save_config();
             g_dirty = 1;
             return 1;
