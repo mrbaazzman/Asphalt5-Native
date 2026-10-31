@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.0 - 2026-10-31
+
+- PC quality-of-life: the phone's on-screen brake/pedal and nitro buttons are
+  hidden during races. Their HUD items stay in the engine with their state
+  intact; only their rectangles move off-screen, so keyboard, mouse zones and
+  XInput gamepad input keep working. Space nitro feeds the engine's nitro
+  input directly while the overlay is hidden.
+- `RECOMP_SHOW_TOUCH=1` restores the original touch overlay for comparison.
+- Verified by the maintainer on 3.2.4, 3.3.7 and 3.4.1: buttons hidden, HUD
+  otherwise normal, steering/brake working and Space nitro firing.
+- Keeps the v2.0.3 heap fixes and the v2.0.1 Defender-safe builder packaging.
+
 ## 2.0.3 - 2026-10-31
 
 - Final fix for the repeated-race heap exhaustion. The shared JNI layer now

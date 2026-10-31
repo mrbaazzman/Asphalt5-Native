@@ -56,6 +56,10 @@ Gamepad (XInput, optional):
   not open the quit-to-menu confirmation.
 - The port forces the in-race buttons layout. The phone-rotation steering
   assist is disabled while that layout is active.
+- The on-screen pedal, brake and nitro buttons are hidden during races on PC.
+  The engine keeps their state, so the keyboard, mouse zones and gamepad
+  controls above still work. Set `RECOMP_SHOW_TOUCH=1` to show the original
+  touch overlay.
 - Mouse input stays in the 854x480 logical canvas at any window size.
 
 ## Runtime switches
@@ -76,6 +80,7 @@ These are intended for testing, not normal play.
 | `RECOMP_CAPTURE_FRAME=n` | capture frame |
 | `RECOMP_NITRO_LOG=n` | dump car input/nitro state every n frames |
 | `RECOMP_INPUT_LOG=1` | log key/action transitions |
+| `RECOMP_SHOW_TOUCH=1` | show the phone touch overlay during races |
 | `RECOMP_CAM_LOG=1` | log camera cuts and smoothing |
 | `RECOMP_START_LOG=1` | log pre-race orientation holds |
 | `RECOMP_EXIT_FRAME=n` | invoke `Game::Exit` at frame n |

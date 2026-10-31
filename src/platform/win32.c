@@ -338,6 +338,43 @@ static int pause_menu_active(void)
     return st && vtab && rd32(st) == vtab + 8;
 }
 
+/* PC QoL: hide the phone's on-screen touch buttons.  The HUD items stay in
+ * the game's array and keep their state; only their rectangles are moved
+ * off-screen, so input through keyboard/mouse/GamePad is unaffected. */
+static int g_touch_hidden;
+
+static void hide_touch_buttons(void)
+{
+    uint32_t st, vtab, arr, n;
+    if (!g_cpu || getenv("RECOMP_SHOW_TOUCH")) return;
+    st = current_game_state();
+    vtab = guest_symbol("_ZTV6GS_Run");
+    if (!st || !vtab || rd32(st) != vtab + 8) return;
+    arr = rd32(st + 0x10);
+    n = rd32(st + 0x18);
+    if (!arr || n > 32) return;
+    for (uint32_t k = 0; k < n; k++) {
+        uint32_t it = rd32(arr + k * 4);
+        float x0, y0, x1, y1;
+        int px, py;
+        if (!it) continue;
+        x0 = f32_from_bits(rd32(it + 0x00));
+        y0 = f32_from_bits(rd32(it + 0x04));
+        x1 = f32_from_bits(rd32(it + 0x08));
+        y1 = f32_from_bits(rd32(it + 0x0c));
+        px = (int)((x0 + x1) * 0.5f);
+        py = (int)((y0 + y1) * 0.5f);
+        if (px < 0 || px >= g_logical_w || py < 0 || py >= g_logical_h) continue;
+        wr32(it + 0x00, 0xC61C4000u); /* -10000.0f */
+        wr32(it + 0x04, 0xC61C4000u);
+        wr32(it + 0x08, 0xC61C4000u);
+        wr32(it + 0x0c, 0xC61C4000u);
+    }
+    g_touch_hidden = 1;
+    if (getenv("RECOMP_INPUT_LOG"))
+        fprintf(stderr, "[input] touch buttons hidden\n");
+}
+
 static int pause_menu_resume(void)
 {
     uint32_t st = current_game_state();
@@ -437,6 +474,7 @@ static int g_nitro_ticks;
 static void nitro_down(void)
 {
     if (g_nitro_touch || !g_cpu) return;
+    if (g_touch_hidden) { g_nitro_ticks = 1; return; }
     int x, y;
     if (!nitro_center(&x, &y)) return;    /* no live HUD: nothing to press */
     touch("notifyTouchPress", x, y, 1);   /* id 1, separate from the mouse */
@@ -1042,6 +1080,10 @@ void platform_pump(void)
         release_race_inputs();
         if (getenv("RECOMP_INPUT_LOG"))
             fprintf(stderr, "[input] %s\n", race ? "race entered" : "race left");
+    }
+    if (race) {
+        static int hide_tick;
+        if ((hide_tick++ % 30) == 0) hide_touch_buttons();
     }
     if (!race && g_compact_wait > 0 && --g_compact_wait == 0)
         guest_heap_compact();

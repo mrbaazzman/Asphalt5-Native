@@ -19,7 +19,7 @@
   ],
   "links": [
     { "label": "GitHub", "url": "https://github.com/mrbaazzman/Asphalt5-Native" },
-    { "label": "Release", "url": "https://github.com/mrbaazzman/Asphalt5-Native/releases/tag/v2.0.0" }
+    { "label": "Release", "url": "https://github.com/mrbaazzman/Asphalt5-Native/releases/tag/v2.1.0" }
   ],
   "help": ["Linux/macOS port", "Testing on more GPUs"],
   "tags": ["asphalt", "android", "racing", "windows", "static-recomp"],

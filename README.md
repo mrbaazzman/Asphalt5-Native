@@ -30,7 +30,7 @@ It does not contain the APK, the original `.so`, or the game data packs.
 | Physics | Original 25 Hz fixed-step engine code |
 | Frame rate | Unlocked; optional cap with `RECOMP_FPS` |
 | Camera | Real-time view smoothing at high frame rates |
-| Input | Keyboard, mouse and optional XInput gamepad |
+| Input | Keyboard, mouse and optional XInput gamepad; phone touch overlay hidden in races |
 | Audio | Engine vox mixer, WinMM output |
 | Movies | Intro and career H.264 videos |
 | Pause / exit | `Esc` toggles pause/resume; in-game Exit quits |

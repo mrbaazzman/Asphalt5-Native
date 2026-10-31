@@ -72,6 +72,10 @@ Keyboard    arrows or A/D steer, W/S accelerate/brake, Space nitro,
             C camera, Esc pause/resume, Ctrl+Q quit
 Movies      click or Esc to skip
 
+The phone's on-screen touch buttons are hidden during races. Mouse zones,
+keyboard and gamepad controls above still work. Set RECOMP_SHOW_TOUCH=1 to
+show the original touch overlay.
+
 Silent mode
 -----------
   Asphalt5Setup.exe --silent --apk <file.apk> --dir <dir>
