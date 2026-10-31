@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.2 - 2026-10-31
+
+- Fix the guest heap exhaustion that crashed the game after roughly three
+  quick races. JNI `DeleteLocalRef` now releases guest-side strings and byte
+  arrays instead of leaking them, and a heap sweep runs only when a new
+  allocation no longer fits: it rebuilds the free lists and drops trailing
+  free space without moving live blocks.
+- This affects all three builds (3.2.4, 3.3.7, 3.4.1); the leak was in the
+  shared JNI/host heap layer, not in a specific engine build.
+- Add `A5_HEAP_LOG=1` diagnostics (`[heap] frame ... top=...`) for future
+  memory reports.
+
 ## 2.0.1 - 2026-10-29
 
 - Fixed the Microsoft Defender false positive on `Asphalt5Setup.exe`

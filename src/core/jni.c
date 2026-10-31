@@ -303,7 +303,17 @@ static void jni_dispatch(CPU *cpu, unsigned index)
     case 15: cpu->r[0] = 0; return;                          /* ExceptionOccurred */
     case 17: return;                                         /* ExceptionClear */
     case 21: cpu->r[0] = a1; return;                         /* NewGlobalRef */
-    case 23: return;                                         /* DeleteLocalRef */
+    case 23: {                                               /* DeleteLocalRef */
+        if (a1) {
+            GuestString *s = (GuestString *)G(a1);
+            if (s->tag == TAG_STRING || s->tag == TAG_ARRAY) {
+                if (getenv("A5_JNI_REF_LOG"))
+                    fprintf(stderr, "[jni] free ref %08x tag=%08x\n", a1, s->tag);
+                guest_free(a1);
+            }
+        }
+        return;
+    }
     case 31: cpu->r[0] = 0x1001u; return;                    /* GetObjectClass */
     case 33: {                                               /* GetMethodID */
         const char *n = (const char *)G(a2), *s = (const char *)G(a3);

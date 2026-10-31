@@ -1011,6 +1011,8 @@ static int run_boot(const char *so)
                     if (st) vt = rd32(st) - 8;
                 }
             }
+            if (getenv("A5_HEAP_LOG"))
+                fprintf(stderr, "[heap] frame %d top=%08x\n", frame, guest_heap_top());
             fprintf(stderr, "[boot] frame %d draws=%llu clears=%llu tex=%llu/%llu clear=%.2f/%.2f/%.2f/%.2f tex=%dx%d fmt=%x/%x nonwhite=%d state=%x touch=%u\n",
                     frame, (unsigned long long)gles1_draws(), (unsigned long long)gles1_clears(),
                     (unsigned long long)gles1_uploaded(), (unsigned long long)gles1_generated(),

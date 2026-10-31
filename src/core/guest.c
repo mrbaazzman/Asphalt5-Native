@@ -528,6 +528,47 @@ static void heap_ensure(uint32_t end)
     g_heap_end = new_end;
 }
 
+/* Rebuild the free lists and drop trailing free space.  Called only when a
+ * new allocation no longer fits, so the cost is paid at the point where it
+ * can save the process.  Live blocks are never moved. */
+static int heap_sweep(void)
+{
+    uint32_t p = 0x11000000u;
+    uint32_t top = g_heap_top;
+    uint32_t high_live = p;
+    uint32_t free_bytes = 0;
+    memset(g_bins, 0, sizeof(g_bins));
+    while (p < top) {
+        uint32_t total = rd32(p);
+        uint32_t flags;
+        uint32_t next;
+        if (total < 32u || (p + total) > top ||
+            rd32(p + 4) != GHEAP_MAGIC) {
+            return 0;
+        }
+        flags = rd32(p + 12);
+        next = p + total;
+        if (flags & GHEAP_FREE) {
+            int bin = (int)(total / 16u);
+            if (bin >= GHEAP_BINS - 1) bin = GHEAP_BINS - 1;
+            wr32(p + 8, g_bins[bin]);
+            g_bins[bin] = p;
+            free_bytes += total;
+        } else {
+            high_live = next;
+        }
+        p = next;
+    }
+    if (p == top && high_live < top) {
+        g_heap_top = high_live;
+        if (g_verbose)
+            fprintf(stderr, "[guest] heap sweep: top %08x -> %08x (free %u)\n",
+                    top, g_heap_top, free_bytes);
+        return 1;
+    }
+    return 0;
+}
+
 uint32_t guest_alloc(size_t n)
 {
     /* Reject requests that cannot fit.  Without this, a negative/garbage
@@ -586,11 +627,17 @@ uint32_t guest_alloc(size_t n)
 
     uint32_t p = g_heap_top;
     if (p + total < p || p + total > 0x40000000u) {
+        if (heap_sweep()) {
+            p = g_heap_top;
+            if (p + total >= p && p + total <= 0x40000000u)
+                goto retry_alloc;
+        }
         fprintf(stderr, "[guest] heap exhausted (n=%llu top=%08x total=%08x)\n",
                 (unsigned long long)n, p, total);
         platform_crash_log("guest heap exhausted (bump)");
         ExitProcess(3);
     }
+retry_alloc:;
     heap_ensure(p + total);
     g_heap_top += total;
     wr32(p, total);
