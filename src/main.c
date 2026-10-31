@@ -996,6 +996,8 @@ static int run_boot(const char *so)
             if (g) G(g + 0x1d72)[0] = 0;
         }
         frame_limit(frame, g_game);
+        if ((frame % 600) == 0)
+            guest_heap_compact();
         frame++;
         if ((frame % 120) == 0) {
             int tw, th, tf, tif;
@@ -1011,8 +1013,12 @@ static int run_boot(const char *so)
                     if (st) vt = rd32(st) - 8;
                 }
             }
-            if (getenv("A5_HEAP_LOG"))
-                fprintf(stderr, "[heap] frame %d top=%08x\n", frame, guest_heap_top());
+            if (getenv("A5_HEAP_LOG")) {
+                uint32_t hf = 0, hl = 0, hb = 0;
+                guest_heap_stats(&hf, &hl, &hb);
+                fprintf(stderr, "[heap] frame %d top=%08x free=%u live=%u blocks=%u\n",
+                        frame, guest_heap_top(), hf, hl, hb);
+            }
             fprintf(stderr, "[boot] frame %d draws=%llu clears=%llu tex=%llu/%llu clear=%.2f/%.2f/%.2f/%.2f tex=%dx%d fmt=%x/%x nonwhite=%d state=%x touch=%u\n",
                     frame, (unsigned long long)gles1_draws(), (unsigned long long)gles1_clears(),
                     (unsigned long long)gles1_uploaded(), (unsigned long long)gles1_generated(),

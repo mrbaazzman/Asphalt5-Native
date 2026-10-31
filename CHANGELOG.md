@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.3 - 2026-10-31
+
+- Final fix for the repeated-race heap exhaustion. The shared JNI layer now
+  releases local strings/arrays, the heap coalesces adjacent free blocks and
+  drops trailing free space, and a lightweight compaction runs every 600
+  frames to keep the free lists reusable.
+- Verified by the maintainer through 12 consecutive quick races on 3.3.7
+  without a crash. The same shared heap/JNI code is used by 3.2.4 and 3.4.1.
+- Keeps the v2.0.1 packaging fix: the builder payload is obfuscated, so the
+  setup no longer triggers the Defender Wacapew false positive.
+
 ## 2.0.2 - 2026-10-31
 
 - Fix the guest heap exhaustion that crashed the game after roughly three

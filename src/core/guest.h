@@ -407,6 +407,8 @@ uint32_t guest_alloc_zero(size_t n);
 void guest_free(uint32_t p);
 uint32_t guest_realloc(uint32_t p, size_t n);
 uint32_t guest_heap_top(void);
+void guest_heap_stats(uint32_t *free_bytes, uint32_t *live_bytes, uint32_t *blocks);
+void guest_heap_compact(void);
 
 /* generated import veneers */
 typedef struct { const char *name; GuestFn fn; } ImportDef;

@@ -161,6 +161,7 @@ static void control_mode_set(int v)
 }
 
 static int g_race_now;
+static int g_compact_wait;
 static int g_saved_control_mode = -1;
 static int g_control_entered;
 
@@ -1035,12 +1036,15 @@ void platform_pump(void)
     }
     if (race != g_race_now) {
         g_race_now = race;
+        if (!race) g_compact_wait = 120;
         /* Drop anything held through the menu transition so the car starts
          * centred; a menu-held steer/brake must not pull it off-line. */
         release_race_inputs();
         if (getenv("RECOMP_INPUT_LOG"))
             fprintf(stderr, "[input] %s\n", race ? "race entered" : "race left");
     }
+    if (!race && g_compact_wait > 0 && --g_compact_wait == 0)
+        guest_heap_compact();
     gamepad_poll();
 
     POINT p;

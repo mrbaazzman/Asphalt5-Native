@@ -533,40 +533,87 @@ static void heap_ensure(uint32_t end)
  * can save the process.  Live blocks are never moved. */
 static int heap_sweep(void)
 {
-    uint32_t p = 0x11000000u;
-    uint32_t top = g_heap_top;
-    uint32_t high_live = p;
-    uint32_t free_bytes = 0;
-    memset(g_bins, 0, sizeof(g_bins));
+    uint32_t p, top, high_live;
+
+    /* Pass 1: merge adjacent free blocks and find the end of the last live
+     * block.  Nothing is moved; only free headers and g_heap_top change. */
+    p = 0x11000000u;
+    top = g_heap_top;
+    high_live = p;
     while (p < top) {
         uint32_t total = rd32(p);
-        uint32_t flags;
-        uint32_t next;
-        if (total < 32u || (p + total) > top ||
-            rd32(p + 4) != GHEAP_MAGIC) {
+        if (total < 32u || (p + total) > top || rd32(p + 4) != GHEAP_MAGIC)
             return 0;
+        if (rd32(p + 12) & GHEAP_FREE) {
+            uint32_t q = p + total;
+            uint32_t merged = total;
+            while (q < top) {
+                uint32_t nt = rd32(q);
+                if (nt < 32u || (q + nt) > top || rd32(q + 4) != GHEAP_MAGIC ||
+                    !(rd32(q + 12) & GHEAP_FREE))
+                    break;
+                merged += nt;
+                q += nt;
+            }
+            if (merged != total) wr32(p, merged);
+            total = merged;
+        } else {
+            high_live = p + total;
         }
-        flags = rd32(p + 12);
-        next = p + total;
-        if (flags & GHEAP_FREE) {
+        p += total;
+    }
+    if (p != top) return 0;
+
+    /* Pass 2: rebuild the bins from live/free headers that remain below the
+     * new top.  Trailing free space is simply dropped. */
+    if (high_live < top) {
+        g_heap_top = high_live;
+        top = high_live;
+    }
+    memset(g_bins, 0, sizeof(g_bins));
+    p = 0x11000000u;
+    while (p < top) {
+        uint32_t total = rd32(p);
+        if (total < 32u || (p + total) > top || rd32(p + 4) != GHEAP_MAGIC)
+            return 0;
+        if (rd32(p + 12) & GHEAP_FREE) {
             int bin = (int)(total / 16u);
             if (bin >= GHEAP_BINS - 1) bin = GHEAP_BINS - 1;
             wr32(p + 8, g_bins[bin]);
             g_bins[bin] = p;
-            free_bytes += total;
-        } else {
-            high_live = next;
         }
-        p = next;
+        p += total;
     }
-    if (p == top && high_live < top) {
-        g_heap_top = high_live;
-        if (g_verbose)
-            fprintf(stderr, "[guest] heap sweep: top %08x -> %08x (free %u)\n",
-                    top, g_heap_top, free_bytes);
-        return 1;
+    if (g_verbose)
+        fprintf(stderr, "[guest] heap sweep: top -> %08x\n", g_heap_top);
+    return 1;
+}
+
+void guest_heap_stats(uint32_t *free_bytes, uint32_t *live_bytes, uint32_t *blocks)
+{
+    uint32_t p = 0x11000000u, top = g_heap_top;
+    uint32_t f = 0, l = 0, n = 0;
+    if (free_bytes) *free_bytes = 0;
+    if (live_bytes) *live_bytes = 0;
+    if (blocks) *blocks = 0;
+    while (p < top) {
+        uint32_t total = rd32(p);
+        if (total < 32u || (p + total) > top || rd32(p + 4) != GHEAP_MAGIC)
+            break;
+        if (rd32(p + 12) & GHEAP_FREE) f += total; else l += total;
+        n++;
+        p += total;
     }
-    return 0;
+    if (free_bytes) *free_bytes = f;
+    if (live_bytes) *live_bytes = l;
+    if (blocks) *blocks = n;
+}
+
+void guest_heap_compact(void)
+{
+    AcquireSRWLockExclusive(&g_heap_lock);
+    heap_sweep();
+    ReleaseSRWLockExclusive(&g_heap_lock);
 }
 
 uint32_t guest_alloc(size_t n)
