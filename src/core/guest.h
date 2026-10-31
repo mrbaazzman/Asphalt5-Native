@@ -451,6 +451,7 @@ int  platform_logical_height(void);
 
 /* Host hooks for the engine's controls page. */
 int  guest_control_menu_label(CPU *cpu);
+int  guest_force_control_mode(CPU *cpu);
 int  guest_control_menu_action(CPU *cpu);
 int  guest_control_menu_bar_action(CPU *cpu);
 int  guest_control_menu_click(CPU *cpu);

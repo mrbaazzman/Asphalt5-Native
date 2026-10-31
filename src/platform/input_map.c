@@ -1063,16 +1063,29 @@ void guest_string_override(CPU *cpu)
     menu_log("[menu] sensitivity row -> %s", buf);
 }
 
+static void request_open(void);
+
+int platform_control_mode_bypass(void);
+
+int guest_force_control_mode(CPU *cpu)
+{
+    if (platform_control_mode_bypass()) return 0;
+    cpu->r[1] = 2;   /* accelerometer */
+    return 0;
+}
+
 int guest_control_menu_action(CPU *cpu)
 {
     menu_log("[menu] do r1=%x r2=%x open=%d req=%d label=%d",
              cpu->r[1], cpu->r[2], g_open, g_open_requested, g_controls_label);
     /* Index 6 is the Controls row (five OPTIONS tabs plus Auto
-     * Accelerate).  The engine calls DoAction on release; without this
-     * guard that release cycles the control scheme after the mapper has
-     * already opened. */
-    if (g_controls_label && (g_open || g_open_requested) && cpu->r[1] == 6) {
-        menu_log("[menu] suppressed Controls row action");
+     * Accelerate).  This row is now the mapper entry, so never let the
+     * stock action cycle ACCELEROMETER/BUTTONS.  Opening here as well as
+     * in the mouse-down hook makes the button reliable on the first,
+     * second and later presses. */
+    if (g_controls_label && cpu->r[1] == 6) {
+        menu_log("[menu] mapper action replaces Controls row action");
+        request_open();
         return 1;
     }
     return 0;
@@ -1096,7 +1109,18 @@ static int menu_row_at(void)
     lw = platform_logical_width();
     lh = platform_logical_height();
     if (lw < 1 || lh < 1) return -1;
-    if (platform_last_click(&lx, &ly)) {
+    if ((GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0) {
+        /* A real mouse click can arrive before the window is focused, so
+         * WM_LBUTTONDOWN may not have reached us yet.  The cursor is the
+         * click position either way. */
+        if (!g_host || !GetCursorPos(&p) || !ScreenToClient(g_host, &p)) return -1;
+        if (!GetClientRect(g_host, &rc)) return -1;
+        w = rc.right - rc.left;
+        h = rc.bottom - rc.top;
+        if (w < 1 || h < 1) return -1;
+        lx = p.x * lw / w;
+        ly = p.y * lh / h;
+    } else if (platform_last_click(&lx, &ly)) {
         if (!g_host || !GetClientRect(g_host, &rc)) return -1;
         w = rc.right - rc.left;
         h = rc.bottom - rc.top;

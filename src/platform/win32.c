@@ -145,6 +145,13 @@ static int control_mode_get(void)
     return (int)rd8(CONTROL_MODE_ADDR);
 }
 
+static int g_control_mode_bypass;
+
+int platform_control_mode_bypass(void)
+{
+    return g_control_mode_bypass;
+}
+
 static void control_mode_set(int v)
 {
     uint32_t obj = game_settings_addr();
@@ -154,7 +161,9 @@ static void control_mode_set(int v)
         g_cpu->r[0] = obj;
         g_cpu->r[1] = (uint32_t)v;
         g_cpu->r[14] = 0;
+        g_control_mode_bypass = 1;
         guest_call(g_cpu, fn);
+        g_control_mode_bypass = 0;
         g_cpu->r[14] = old_lr;
         return;
     }
@@ -1106,7 +1115,12 @@ void platform_pump(void)
             g_control_entered = 0;
             release_race_inputs();
         }
-        g_saved_control_mode = control_mode_get();
+        g_saved_control_mode = 2;
+        {
+            static unsigned force_tick;
+            if ((force_tick++ % 30) == 0 && control_mode_get() != 2)
+                control_mode_set(2);
+        }
     }
     if (race != g_race_now) {
         g_race_now = race;
@@ -1274,17 +1288,20 @@ void platform_note_touch(int x, int y)
 }
 
 static int g_last_click_x, g_last_click_y, g_last_click_valid;
+static DWORD g_last_click_tick;
 
 void platform_note_click(int x, int y)
 {
     g_last_click_x = x;
     g_last_click_y = y;
     g_last_click_valid = 1;
+    g_last_click_tick = GetTickCount();
 }
 
 int platform_last_click(int *x, int *y)
 {
     if (!g_last_click_valid) return 0;
+    if (GetTickCount() - g_last_click_tick > 500) return 0;
     if (x) *x = g_last_click_x;
     if (y) *y = g_last_click_y;
     return 1;
