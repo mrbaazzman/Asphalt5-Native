@@ -41,6 +41,124 @@ static int g_method_count;
 
 static char g_jni_path[2048];
 
+/* Local/global reference tracking for guest strings and arrays.  The game
+ * may keep a global ref after deleting the local one, so freeing on
+ * DeleteLocalRef alone would leave the global ref dangling. */
+#define JNI_REF_MAX 8192
+typedef struct { uint32_t p; unsigned short local, global; } JniRef;
+static JniRef g_refs[JNI_REF_MAX];
+static int g_ref_count;
+
+static int guest_ptr(uint32_t p)
+{
+    return p >= 0x11000000u && p < guest_heap_top();
+}
+
+/* Race-time refs are kept until the race ends, then freed in one batch.
+ * Menu/loading refs are kept for the process lifetime because 3.4.1 still
+ * reads some of them after DeleteLocalRef. */
+#define JNI_DEFER_MAX 131072
+static uint32_t g_menu_deferred[JNI_DEFER_MAX];
+static int g_menu_deferred_n;
+static uint32_t g_race_deferred[JNI_DEFER_MAX];
+static int g_race_deferred_n;
+
+static void defer_list_free(uint32_t *list, int *count)
+{
+    for (int i = 0; i < *count; i++)
+        guest_free(list[i]);
+    *count = 0;
+}
+
+void jni_free_menu_deferred(void)
+{
+    defer_list_free(g_menu_deferred, &g_menu_deferred_n);
+}
+
+void jni_free_race_deferred(void)
+{
+    defer_list_free(g_race_deferred, &g_race_deferred_n);
+}
+
+void jni_free_deferred(void)
+{
+    jni_free_menu_deferred();
+    jni_free_race_deferred();
+}
+
+static void jni_defer(uint32_t p, int race)
+{
+    uint32_t *list = race ? g_race_deferred : g_menu_deferred;
+    int *count = race ? &g_race_deferred_n : &g_menu_deferred_n;
+    if (*count < JNI_DEFER_MAX)
+        list[(*count)++] = p;
+    else
+        guest_free(p);
+}
+
+static JniRef *ref_find(uint32_t p)
+{
+    for (int i = 0; i < g_ref_count; i++)
+        if (g_refs[i].p == p) return &g_refs[i];
+    return NULL;
+}
+
+static void ref_track(uint32_t p)
+{
+    JniRef *r;
+    if (!guest_ptr(p)) return;
+    r = ref_find(p);
+    if (r) {
+        if (r->local < 0xffff) r->local++;
+        return;
+    }
+    if (g_ref_count >= JNI_REF_MAX) return;
+    r = &g_refs[g_ref_count++];
+    r->p = p;
+    r->local = 1;
+    r->global = 0;
+}
+
+static void ref_global(uint32_t p)
+{
+    JniRef *r;
+    if (!guest_ptr(p)) return;
+    r = ref_find(p);
+    if (!r) {
+        if (g_ref_count >= JNI_REF_MAX) return;
+        r = &g_refs[g_ref_count++];
+        r->p = p;
+        r->local = 1;
+        r->global = 0;
+    }
+    if (r->global < 0xffff) r->global++;
+}
+
+static int ref_remove(JniRef *r)
+{
+    int i = (int)(r - g_refs);
+    g_refs[i] = g_refs[--g_ref_count];
+    return 1;
+}
+
+static int ref_drop_local(uint32_t p)
+{
+    JniRef *r = ref_find(p);
+    if (!r) return 0;
+    if (r->local) r->local--;
+    if (!r->local && !r->global) return ref_remove(r);
+    return 0;
+}
+
+static int ref_drop_global(uint32_t p)
+{
+    JniRef *r = ref_find(p);
+    if (!r) return 0;
+    if (r->global) r->global--;
+    if (!r->local && !r->global) return ref_remove(r);
+    return 0;
+}
+
 static const char *jstr(uint32_t h)
 {
     if (!h) return "";
@@ -57,6 +175,7 @@ static uint32_t make_string(const char *s)
     g->tag = TAG_STRING; g->len = (uint32_t)n;
     if (n) memcpy(g->data, s, n);
     g->data[n] = 0;
+    ref_track(p);
     return p;
 }
 
@@ -66,6 +185,7 @@ static uint32_t make_array(const void *data, size_t n)
     GuestArray *a = (GuestArray *)G(p);
     a->tag = TAG_ARRAY; a->len = (uint32_t)n;
     if (n && data) memcpy(a->data, data, n);
+    ref_track(p);
     return p;
 }
 
@@ -302,15 +422,26 @@ static void jni_dispatch(CPU *cpu, unsigned index)
     case 6: cpu->r[0] = 0x1001u; return;                     /* FindClass */
     case 15: cpu->r[0] = 0; return;                          /* ExceptionOccurred */
     case 17: return;                                         /* ExceptionClear */
-    case 21: cpu->r[0] = a1; return;                         /* NewGlobalRef */
-    case 23: {                                               /* DeleteLocalRef */
-        if (a1) {
+    case 21:                                                 /* NewGlobalRef */
+        if (a1) ref_global(a1);
+        cpu->r[0] = a1;
+        return;
+    case 22:                                                 /* DeleteGlobalRef */
+        if (a1 && ref_drop_global(a1)) {
             GuestString *s = (GuestString *)G(a1);
-            if (s->tag == TAG_STRING || s->tag == TAG_ARRAY) {
-                if (getenv("A5_JNI_REF_LOG"))
-                    fprintf(stderr, "[jni] free ref %08x tag=%08x\n", a1, s->tag);
-                guest_free(a1);
-            }
+            if (getenv("A5_NO_JNI_FREE")) return;
+            if (s->tag == TAG_ARRAY)
+                jni_defer(a1, platform_buttons_mode());
+            /* Strings are kept: 3.4.1 reads some of them after deletion. */
+        }
+        return;
+    case 23: {                                               /* DeleteLocalRef */
+        if (getenv("A5_NO_JNI_FREE")) return;
+        if (a1 && ref_drop_local(a1)) {
+            GuestString *s = (GuestString *)G(a1);
+            if (s->tag == TAG_ARRAY)
+                jni_defer(a1, platform_buttons_mode());
+            /* Strings are kept: 3.4.1 reads some of them after deletion. */
         }
         return;
     }

@@ -999,7 +999,7 @@ static int run_boot(const char *so)
             if (g) G(g + 0x1d72)[0] = 0;
         }
         frame_limit(frame, g_game);
-        if ((frame % 600) == 0)
+        if ((frame % 600) == 0 && !getenv("A5_NO_HEAP_SWEEP"))
             guest_heap_compact();
         frame++;
         if ((frame % 120) == 0) {

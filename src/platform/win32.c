@@ -1145,6 +1145,7 @@ void platform_pump(void)
             g_saved_control_mode = control_mode_get();
             control_mode_set(2);
             g_control_entered = 1;
+            jni_free_menu_deferred();
         }
     } else {
         hold_start_orientation();
@@ -1176,8 +1177,11 @@ void platform_pump(void)
     }
     if (race)
         hide_touch_buttons();
-    if (!race && g_compact_wait > 0 && --g_compact_wait == 0)
-        guest_heap_compact();
+    if (!race && g_compact_wait > 0 && --g_compact_wait == 0) {
+        jni_free_race_deferred();
+        if (!getenv("A5_NO_HEAP_SWEEP"))
+            guest_heap_compact();
+    }
 
     POINT p;
     int have = 0, gx = 0, gy = 0;

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.2 - 2026-11-01
+
+- Fixed the white loading and Options backgrounds on 3.4.1. The JNI
+  local-ref cleanup added after v2.0.1 freed strings and small arrays that
+  the 3.4.1 code still reads after DeleteLocalRef. Strings are now kept, and
+  arrays are freed only after the current menu/race phase has finished.
+- Fixed the repeated-race heap exhaustion without bringing the 3.4.1
+  background failure back: menu arrays are released when a race starts,
+  race arrays are released 120 frames after the race ends, and the heap is
+  compacted at the same point.
+- Verified by the maintainer through more than 10 consecutive races on
+  3.4.1.
+
 ## 2.2.1 - 2026-11-01
 
 - Fixed background/unfocused input. The game no longer polls keyboard,
