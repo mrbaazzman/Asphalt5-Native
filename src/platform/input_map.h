@@ -17,6 +17,7 @@ enum {
 int  host_game_in_race(void);
 int  host_pause_context(void);
 void host_input_action(int act, int down, unsigned src);
+int  input_map_try_stock_click(int x, int y);
 
 void input_map_init(HWND hwnd);
 void input_map_pump(void);

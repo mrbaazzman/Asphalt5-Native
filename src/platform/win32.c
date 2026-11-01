@@ -152,14 +152,6 @@ int platform_control_mode_bypass(void)
     return g_control_mode_bypass;
 }
 
-int platform_set_auto_accelerate(int v)
-{
-    uint32_t obj = game_settings_addr();
-    if (!obj) return 0;
-    wr8(obj + 0xcu, v ? 1 : 0);
-    return 1;
-}
-
 static void control_mode_set(int v)
 {
     uint32_t obj = game_settings_addr();
@@ -180,7 +172,6 @@ static void control_mode_set(int v)
 
 void platform_note_click(int x, int y);
 int platform_last_click(int *x, int *y);
-int input_map_auto_accelerate(void);
 
 static int g_race_now;
 static int g_mouse_release_wait;
@@ -282,6 +273,14 @@ enum { ACT_STEER_L, ACT_STEER_R, ACT_BRAKE, ACT_ACCEL, ACT_COUNT };
 static const int act_code[ACT_COUNT] = {
     AKEY_DPAD_LEFT, AKEY_DPAD_RIGHT, AKEY_DPAD_DOWN, AKEY_DPAD_UP
 };
+#ifdef RECOMP_TARGET_337
+/* 3.3.7's GetKeyMask() no longer maps the D-pad keycodes.  Feed the
+ * GamePad's key mask directly instead. */
+static const uint32_t act_mask[ACT_COUNT] = { 0x1u, 0x2u, 0x4u, 0x8u };
+#define SEND_ACTION(act, down) game_mask(act_mask[act], down)
+#else
+#define SEND_ACTION(act, down) game_key(act_code[act], down)
+#endif
 #define ACT_SRC_KEY 1u
 #define ACT_SRC_PAD 2u
 #define ACT_SRC_MOUSE 4u
@@ -298,10 +297,10 @@ static void action_down_src(int act, unsigned src)
          * from another device (keyboard + gamepad).  Otherwise the engine
          * receives both D-pad bits and treats the steering as neutral. */
         act_src[opp] = 0;
-        game_key(act_code[opp], 0);
+        SEND_ACTION(opp, 0);
     }
     if (act_src[act] == 0)
-        game_key(act_code[act], 1);
+        SEND_ACTION(act, 1);
     act_src[act] |= src;
 }
 
@@ -309,7 +308,7 @@ static void action_up_src(int act, unsigned src)
 {
     if (!(act_src[act] & src)) return;
     act_src[act] &= ~src;
-    if (!act_src[act]) game_key(act_code[act], 0);
+    if (!act_src[act]) SEND_ACTION(act, 0);
 }
 
 static void action_down(int act) { action_down_src(act, ACT_SRC_KEY); }
@@ -318,7 +317,7 @@ static void action_up(int act) { action_up_src(act, ACT_SRC_KEY); }
 static void action_release_all(void)
 {
     for (int i = 0; i < ACT_COUNT; i++)
-        if (act_src[i]) { act_src[i] = 0; game_key(act_code[i], 0); }
+        if (act_src[i]) { act_src[i] = 0; SEND_ACTION(i, 0); }
 }
 
 static void release_race_inputs(void);
@@ -369,6 +368,7 @@ static int g_touch_hidden;
 static void hide_touch_buttons(void)
 {
     uint32_t st, vtab, arr, n;
+    int was_hidden = g_touch_hidden;
     if (!g_cpu || getenv("RECOMP_SHOW_TOUCH")) return;
     st = current_game_state();
     vtab = guest_symbol("_ZTV6GS_Run");
@@ -394,7 +394,7 @@ static void hide_touch_buttons(void)
         wr32(it + 0x0c, 0xC61C4000u);
     }
     g_touch_hidden = 1;
-    if (getenv("RECOMP_INPUT_LOG"))
+    if (!was_hidden && getenv("RECOMP_INPUT_LOG"))
         fprintf(stderr, "[input] touch buttons hidden\n");
 }
 
@@ -1124,13 +1124,14 @@ void platform_pump(void)
             g_control_entered = 0;
             release_race_inputs();
         }
-        g_saved_control_mode = 2;
+        /* Mode 1 keeps the stock Auto Accelerate row available.  The race
+         * path above still switches to the mode-2 button layout. */
+        g_saved_control_mode = 1;
         {
             static unsigned force_tick;
             if ((force_tick++ % 30) == 0) {
-                if (control_mode_get() != 2)
-                    control_mode_set(2);
-                platform_set_auto_accelerate(input_map_auto_accelerate());
+                if (control_mode_get() != 1)
+                    control_mode_set(1);
             }
         }
     }
@@ -1143,10 +1144,8 @@ void platform_pump(void)
         if (getenv("RECOMP_INPUT_LOG"))
             fprintf(stderr, "[input] %s\n", race ? "race entered" : "race left");
     }
-    if (race) {
-        static int hide_tick;
-        if ((hide_tick++ % 30) == 0) hide_touch_buttons();
-    }
+    if (race)
+        hide_touch_buttons();
     if (!race && g_compact_wait > 0 && --g_compact_wait == 0)
         guest_heap_compact();
 
@@ -1168,11 +1167,25 @@ void platform_pump(void)
     }
 
     if (race) {
-        int inside = have && gx >= 0 && gx <= 853 && gy >= 0 && gy <= 479;
+        int inside = have && gx >= 0 && gx < g_logical_w && gy >= 0 && gy < g_logical_h;
+        int pause_top = g_logical_h * 20 / 100;
+        int pause_left = g_logical_w * 12 / 100;
+        int pause_right = g_logical_w * 75 / 100;
         if (down && !g_mouse_down && have && inside) {
+            int pause_hit;
             g_mouse_down = 1;
             g_last_mx = gx; g_last_my = gy;
-            if (gy < 70 && (gx < 110 || gx > 720)) {
+#ifdef RECOMP_TARGET_337
+            /* 3.3.7 puts the pause button just right of the POS/LAP block,
+             * still in the left half of the screen. */
+            pause_hit = gy < g_logical_h * 20 / 100 &&
+                        gx > g_logical_w * 12 / 100 &&
+                        gx < g_logical_w * 32 / 100;
+#else
+            pause_hit = gy < pause_top &&
+                        (gx < pause_left || gx > pause_right);
+#endif
+            if (pause_hit) {
                 pause_toggle();          /* top-left alias / real top-right */
             } else {
                 int z = zone_at(gx, gy);
@@ -1209,6 +1222,8 @@ void platform_pump(void)
     }
     if (down) {
         if (!g_mouse_down && have) {
+            if (input_map_try_stock_click(gx, gy))
+                return;
             g_last_mx = gx; g_last_my = gy;
             g_mouse_down = 1;
             touch("notifyTouchPress", gx, gy, 0);

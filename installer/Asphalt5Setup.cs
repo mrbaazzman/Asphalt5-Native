@@ -580,6 +580,7 @@ namespace Asphalt5Setup
             sb.Append("-lopengl32 -lgdi32 -luser32 -lwinmm -lws2_32 -lm " +
                       " -ldinput8 -ldxguid -lmfreadwrite -lmfplat -lmfuuid -lole32 -luuid ");
             if (profile.UsesInstaller) sb.Append("-lwininet -lbcrypt -lcomctl32 -lcomdlg32 ");
+            sb.Append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic ");
             sb.Append("-mwindows");
             return sb.ToString();
         }

@@ -54,18 +54,24 @@ static const char *const act_section[ACT_COUNT] = {
     "steer_left", "steer_right", "accelerate", "brake",
     "nitro", "camera", "pause"
 };
+/* The mapper's row order (accelerate before brake) differs from the host
+ * HACT enum (brake before accelerate). */
+static const int act_hact[ACT_COUNT] = {
+    HACT_STEER_L, HACT_STEER_R, HACT_ACCEL, HACT_BRAKE,
+    HACT_NITRO, HACT_CAMERA, HACT_PAUSE
+};
 
 static HWND g_host;
 static int g_open, g_open_requested;
 static int g_embedded, g_controls_seen, g_controls_active;
 static int g_remap_page, g_remap_action;
 static int g_controls_label;
-static int g_auto_accelerate = 1;
+static DWORD g_controls_tick;
 static int g_capture, g_cap_act, g_cap_cat, g_cap_wait_release;
 static uint32_t g_label_guest[3];
 static int g_selected, g_col;
 static int g_hover_row = -1, g_hover_col = -1;
-static int g_hover_done, g_hover_reset, g_hover_aa;
+static int g_hover_done, g_hover_reset;
 static int g_input_armed = 1;
 
 static int g_prev[ACT_COUNT][2];
@@ -84,7 +90,7 @@ static int g_tex_dirty = 1;
 
 static RECT g_row[ACT_COUNT];
 static RECT g_cell_kb[ACT_COUNT], g_cell_pad[ACT_COUNT];
-static RECT g_reset, g_done, g_aa_rect;
+static RECT g_reset, g_done;
 static int g_capture_rect_valid;
 static RECT g_capture_rect;
 
@@ -417,10 +423,6 @@ static void load_config(void)
             }
             continue;
         }
-        if (strncmp(s, "auto_accelerate=", 16) == 0) {
-            g_auto_accelerate = atoi(s + 16) ? 1 : 0;
-            continue;
-        }
         if (section < 0) continue;
         val = strchr(s, '=');
         if (!val) continue;
@@ -499,7 +501,6 @@ static void save_config(void)
     if (!f) return;
     fprintf(f, "# Asphalt 5 Native input mapping\n");
     fprintf(f, "# key=..., xinput=any:Name, dinput={GUID}:button:N\n");
-    fprintf(f, "auto_accelerate=%d\n\n", g_auto_accelerate);
     for (int a = 0; a < ACT_COUNT; a++) {
         fprintf(f, "[%s]\n", act_section[a]);
         for (int cat = 0; cat < 2; cat++) {
@@ -791,8 +792,8 @@ static int any_bind_down(void)
 static void release_actions(void)
 {
     for (int a = 0; a < ACT_COUNT; a++) {
-        if (g_prev[a][0]) { g_prev[a][0] = 0; host_input_action(a, 0, HOST_SRC_KEY); }
-        if (g_prev[a][1]) { g_prev[a][1] = 0; host_input_action(a, 0, HOST_SRC_PAD); }
+        if (g_prev[a][0]) { g_prev[a][0] = 0; host_input_action(act_hact[a], 0, HOST_SRC_KEY); }
+        if (g_prev[a][1]) { g_prev[a][1] = 0; host_input_action(act_hact[a], 0, HOST_SRC_PAD); }
     }
 }
 
@@ -827,11 +828,11 @@ static void process_actions(void)
         }
         if (kb != g_prev[a][0]) {
             g_prev[a][0] = kb;
-            host_input_action(a, kb, HOST_SRC_KEY);
+            host_input_action(act_hact[a], kb, HOST_SRC_KEY);
         }
         if (pad != g_prev[a][1]) {
             g_prev[a][1] = pad;
-            host_input_action(a, pad, HOST_SRC_PAD);
+            host_input_action(act_hact[a], pad, HOST_SRC_PAD);
         }
     }
 }
@@ -853,6 +854,7 @@ static void finish_capture(Bind b)
     g_dirty = 1;
 }
 
+static int g_cap_ignore_a;
 static XINPUT_STATE g_cap_xbase[4];
 static DIJOYSTATE2 g_cap_dbase[MAX_DEV];
 static int g_cap_dbase_ok[MAX_DEV];
@@ -867,6 +869,7 @@ static void begin_capture(int act, int cat)
     /* A mouse or keyboard starts capture with no pad button held.  Only
      * gamepad navigation needs to wait for the A press to be released. */
     g_cap_wait_release = 0;
+    g_cap_ignore_a = 0;
     g_cap_prev_key = 0;
     read_xinput();
     di_poll();
@@ -875,6 +878,10 @@ static void begin_capture(int act, int cat)
         g_cap_xbase[i].Gamepad.wButtons = 0;
         g_cap_xbase[i].Gamepad.bLeftTrigger = 0;
         g_cap_xbase[i].Gamepad.bRightTrigger = 0;
+        g_cap_xbase[i].Gamepad.sThumbLX = 0;
+        g_cap_xbase[i].Gamepad.sThumbLY = 0;
+        g_cap_xbase[i].Gamepad.sThumbRX = 0;
+        g_cap_xbase[i].Gamepad.sThumbRY = 0;
     }
     memset(g_cap_dbase, 0, sizeof(g_cap_dbase));
     memset(g_cap_dbase_ok, 0, sizeof(g_cap_dbase_ok));
@@ -893,6 +900,7 @@ static void cancel_capture(void)
 {
     g_capture = 0;
     g_cap_wait_release = 1;
+    g_cap_ignore_a = 0;
     g_input_armed = 0;
     release_actions();
     g_dirty = 1;
@@ -956,7 +964,11 @@ static int capture_poll(void)
         if (!g_xok[i]) continue;
         g = &g_xs[i].Gamepad;
         base = &g_cap_xbase[i].Gamepad;
+        if (g_cap_ignore_a && !(g->wButtons & XINPUT_GAMEPAD_A))
+            g_cap_ignore_a = 0;
         for (unsigned k = 0; k < sizeof(btns) / sizeof(btns[0]); k++) {
+            if (btns[k].mask == XINPUT_GAMEPAD_A && g_cap_ignore_a)
+                continue;
             if ((g->wButtons & btns[k].mask) &&
                 !(base->wButtons & btns[k].mask)) {
                 Bind b; memset(&b, 0, sizeof(b));
@@ -980,14 +992,14 @@ static int capture_poll(void)
             int dy = (int)g->sThumbLY - (int)base->sThumbLY;
             int drx = (int)g->sThumbRX - (int)base->sThumbRX;
             int dry = (int)g->sThumbRY - (int)base->sThumbRY;
-            if (dx > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_POS; finish_controller(b); return 1; }
-            if (dx < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_NEG; finish_controller(b); return 1; }
-            if (dy > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_POS; finish_controller(b); return 1; }
-            if (dy < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_NEG; finish_controller(b); return 1; }
-            if (drx > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_POS; finish_controller(b); return 1; }
-            if (drx < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_NEG; finish_controller(b); return 1; }
-            if (dry > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_POS; finish_controller(b); return 1; }
-            if (dry < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_NEG; finish_controller(b); return 1; }
+            if (dx > 8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_POS; finish_controller(b); return 1; }
+            if (dx < -8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_NEG; finish_controller(b); return 1; }
+            if (dy > 8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_POS; finish_controller(b); return 1; }
+            if (dy < -8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_NEG; finish_controller(b); return 1; }
+            if (drx > 8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_POS; finish_controller(b); return 1; }
+            if (drx < -8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_NEG; finish_controller(b); return 1; }
+            if (dry > 8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_POS; finish_controller(b); return 1; }
+            if (dry < -8000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_NEG; finish_controller(b); return 1; }
         }
     }
 
@@ -1108,6 +1120,8 @@ int guest_control_menu_label(CPU *cpu)
     uint32_t id = cpu->r[1];
     if (id == 0x4e8u) g_controls_label = 1;
     else if (id != 0x4ecu) g_controls_label = 0;
+    if (id == 0x4e8u || id == 0x4ecu || id == 0x4e2u || id == 0x4e3u)
+        g_controls_tick = GetTickCount();
     if (getenv("RECOMP_REMAP_TEST")) g_remap_page = 1;
     menu_log("[menu] label id=%x remap=%d cap=%d", id, g_remap_page,
              g_capture ? g_cap_cat + 1 : 0);
@@ -1157,15 +1171,12 @@ static void request_open(void);
 
 int platform_control_mode_bypass(void);
 
-int input_map_auto_accelerate(void)
-{
-    return g_auto_accelerate;
-}
-
 int guest_force_control_mode(CPU *cpu)
 {
     if (platform_control_mode_bypass()) return 0;
-    cpu->r[1] = 2;   /* accelerometer */
+    /* Menus use mode 1, which is where the stock Auto Accelerate row is
+     * available.  Races still use the forced mode-2 button layout. */
+    cpu->r[1] = platform_buttons_mode() ? 2 : 1;
     return 0;
 }
 
@@ -1194,7 +1205,6 @@ int guest_control_menu_bar_action(CPU *cpu)
 
 int platform_last_touch(int *x, int *y);
 int platform_last_click(int *x, int *y);
-int platform_set_auto_accelerate(int v);
 void platform_cancel_mouse(void);
 
 static int menu_row_at(void)
@@ -1261,12 +1271,6 @@ int guest_control_menu_click(CPU *cpu)
     row = menu_row_at();
     menu_log("[hook] touch=%d,%d row=%d label=%d open=%d req=%d", tx, ty, row,
              g_controls_label, g_open, g_open_requested);
-    if (row == 0 && g_controls_label) {
-        g_auto_accelerate = !g_auto_accelerate;
-        platform_set_auto_accelerate(g_auto_accelerate);
-        save_config();
-        return 1;
-    }
     if (row == 1 && g_controls_label) {
         request_open();
         return 1;
@@ -1596,24 +1600,6 @@ static void compose(void)
         line(dc, pad_x - 23, y + 8, pad_x - 23, y + rh - 8, RGB(23, 75, 98), 1);
     }
 
-    {
-        int bw = w * 42 / 100;
-        int bh = h * 58 / 1000;
-        int bx = (w - bw) / 2;
-        int by = h * 710 / 1000;
-        char aa[64];
-        g_aa_rect.left = bx; g_aa_rect.top = by;
-        g_aa_rect.right = bx + bw; g_aa_rect.bottom = by + bh;
-        snprintf(aa, sizeof(aa), "AUTO ACCELERATE: %s",
-                 g_auto_accelerate ? "ON" : "OFF");
-        fill_rect(dc, bx, by, bw, bh,
-                  g_hover_aa ? RGB(29, 67, 96) : RGB(13, 38, 59));
-        frame_rect(dc, bx, by, bw, bh,
-                   g_hover_aa ? RGB(74, 238, 255) : RGB(31, 112, 140), 2);
-        draw_centered(dc, aa, by + bh / 2 - row_px / 2, row_px, 0,
-                      RGB(220, 238, 246), w, 0);
-    }
-
     if (g_capture) {
         const char *msg = g_cap_cat == 0 ?
             "PRESS A KEY, BUTTON OR AXIS  -  ESC CANCELS  -  DELETE CLEARS" :
@@ -1780,6 +1766,30 @@ int input_map_overlay_open(void)
     return g_open;
 }
 
+int input_map_try_stock_click(int x, int y)
+{
+    int lw, lh;
+    if (g_open || g_open_requested) return 0;
+    if ((DWORD)(GetTickCount() - g_controls_tick) > 500) return 0;
+    lw = platform_logical_width();
+    lh = platform_logical_height();
+    if (lw < 1 || lh < 1) return 0;
+    if (lh <= 500) {
+        if (x < lw * 15 / 100 || x > lw * 70 / 100) return 0;
+        if (y >= lh * 40 / 100 && y < lh * 60 / 100) {
+            request_open();
+            return 1;
+        }
+        return 0;
+    }
+    if (x < lw * 22 / 100 || x > lw * 66 / 100) return 0;
+    if (y >= lh * 31 / 100 && y < lh * 45 / 100) {
+        request_open();
+        return 1;
+    }
+    return 0;
+}
+
 static void overlay_open(void)
 {
     if (g_open) return;
@@ -1789,7 +1799,7 @@ static void overlay_open(void)
     g_col = 0;
     g_hover_row = -1;
     g_hover_col = -1;
-    g_hover_done = g_hover_reset = g_hover_aa = 0;
+    g_hover_done = g_hover_reset = 0;
     g_dirty = 1;
     create_surface(platform_client_width(), platform_client_height());
     menu_log("[overlay] open client=%dx%d surface=%dx%d", platform_client_width(), platform_client_height(), g_sw, g_sh);
@@ -1841,14 +1851,12 @@ static void update_hover(int x, int y)
     int row = hit_row(x, y, &col);
     int done = point_in(&g_done, x, y);
     int reset = point_in(&g_reset, x, y);
-    int aa = point_in(&g_aa_rect, x, y);
     if (row != g_hover_row || col != g_hover_col ||
-        done != g_hover_done || reset != g_hover_reset || aa != g_hover_aa) {
+        done != g_hover_done || reset != g_hover_reset) {
         g_hover_row = row;
         g_hover_col = col;
         g_hover_done = done;
         g_hover_reset = reset;
-        g_hover_aa = aa;
         g_dirty = 1;
     }
 }
@@ -1881,8 +1889,12 @@ void input_map_pump(void)
                 if (left && !nav_left) { g_col = 0; g_dirty = 1; }
                 if (right && !nav_right) { g_col = 1; g_dirty = 1; }
                 if (a && !nav_a) {
-                    begin_capture(g_selected, g_col);
-                    g_cap_wait_release = (g_cap_cat == 1);
+                    /* Controller A starts a controller-column capture.  Mask
+                     * the A press itself so the next button/axis binds. */
+                    g_col = 1;
+                    begin_capture(g_selected, 1);
+                    g_cap_wait_release = 1;
+                    g_cap_ignore_a = 1;
                 }
             }
             nav_up = up; nav_down = down; nav_left = left; nav_right = right;
@@ -1958,13 +1970,6 @@ int input_map_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (point_in(&g_done, x, y)) { overlay_close(); return 1; }
         if (point_in(&g_reset, x, y)) {
             defaults();
-            save_config();
-            g_dirty = 1;
-            return 1;
-        }
-        if (point_in(&g_aa_rect, x, y)) {
-            g_auto_accelerate = !g_auto_accelerate;
-            platform_set_auto_accelerate(g_auto_accelerate);
             save_config();
             g_dirty = 1;
             return 1;

@@ -1,48 +1,44 @@
 # Changelog
 
-## 2.2.0 - 2026-10-31
+## 2.2.0 - 2026-11-01
 
 - Added the PC input mapper. Open it with **F1** or **OPTIONS -> CONTROLS ->
-  CONFIGURE INPUT**, then click a keyboard or controller cell and press the
-  key, button or axis you want. Bindings save immediately.
+  CONFIGURE INPUT** from the main options or the pause menu, then click a
+  keyboard or controller cell and press the key, button or axis you want.
+  Bindings save immediately.
 - Supports keyboard, XInput controllers and generic DirectInput controllers,
   wheels, pedals and joysticks. Axes and POV hats can be bound as well as
   buttons.
 - Seven actions can be rebound: steer left/right, accelerate, brake, nitro,
   camera and pause. A binding can be cleared with Delete; Reset Defaults and
-  Done are in the overlay. The stock Controls rows are left untouched.
+  Done are in the overlay.
 - Bindings are stored in `%LOCALAPPDATA%\Asphalt5\input.ini`; the file is
   created with defaults on first launch.
 - The overlay owns the mouse and keyboard while open, so clicking a binding
-  no longer toggles Auto Accelerate or changes stock options underneath.
-- The setup now uses a touch-coordinate row test and a page discriminator, so
-  clicking the Controls row opens the mapper without breaking the car-options
-  Window Tint row. DirectInput is loaded dynamically and the builder includes
-  the small import libraries it needs.
-- Capture now accepts either a keyboard key or a controller button/axis no
-  matter which column was clicked, so an Xbox pad is detected even when the
-  row or keyboard cell starts the capture. XInput slot detection is logged
-  with `RECOMP_INPUT_LOG=1`.
-- Xbox pads are handled through XInput only. Their legacy DirectInput
-  duplicate is skipped, so a resting axis can no longer steal a binding.
-  Controller B/Start presses do not close the mapper; close it with Done,
-  Esc or F1.
-- The overlay's Auto Accelerate, Reset Defaults and Done labels are centred in
-  their buttons.
-- Fixed the 854x480 Controls-page row geometry used by 3.2.4 and 3.4.1, so
-  a click on CONFIGURE INPUT is recognised every time instead of falling
-  through to the stock control-scheme toggle.
-- Guarded the stock Controls-row `DoAction`: the release that follows the
-  opening click no longer cycles ACCELEROMETER/BUTTONS behind the overlay.
-- All builds now force the engine control scheme to Accelerometer. The stock
-  AUTO ACCELERATE row remains active; the host toggles its setting directly
-  and saves the choice as `auto_accelerate=0/1` in `input.ini`, so it
-  survives a restart. Only the scheme toggle is replaced by the mapper entry.
-- Restored the previous texture binding and current colour after drawing the
-  overlay, so mapper drawing cannot change the game's texture state.
-- Tested on 3.2.4, 3.3.7 and 3.4.1: overlay opens from F1 and the Controls
-  page, keyboard capture updates the cell and `input.ini`, and the binding
-  persists across restarts.
+  does not change stock options underneath.
+- Xbox pads are handled through XInput only; their legacy DirectInput
+  duplicate is skipped. A controller A press can be bound by pressing A,
+  releasing it and pressing it again. B/Start/Back do not close the mapper.
+- The stock AUTO ACCELERATE row is available again and is controlled by the
+  game itself. Menus use control mode 1 so the row is not disabled; races
+  still switch to the mode-2 button layout. The mapper overlay's separate
+  Auto Accelerate button and `auto_accelerate` setting were removed.
+- CONFIGURE INPUT opens the mapper from the pause-menu Controls page as well
+  as from the main Options page.
+- 3.3.7: keyboard/gamepad accelerate and brake feed the GamePad key mask
+  directly because that build no longer maps the D-pad keycodes. The race
+  pause button hotzone uses the real 1024x600 layout instead of the 854x480
+  corner test.
+- The phone touch buttons are hidden every frame during a race, so resuming
+  from pause no longer flashes them.
+- All three builds statically link the pthread runtime, so
+  `libwinpthread-1.dll` is no longer required.
+- Fixed the 854x480 Controls-page row geometry used by 3.2.4 and 3.4.1.
+- Guarded the stock Controls-row DoAction so the opening click cannot cycle
+  ACCELEROMETER/BUTTONS behind the overlay.
+- Tested by the maintainer on 3.2.4, 3.3.7 and 3.4.1: mapper entry, capture,
+  persistence, stock Auto Accelerate, pause-menu entry and touch-button
+  hiding.
 
 ## 2.1.0 - 2026-10-31
 
