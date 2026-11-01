@@ -122,6 +122,13 @@ installer/    Windows installer source
 docs/         build, controls, architecture and testing notes
 ```
 
+## Support
+
+This project is free and unofficial. If it saved you some time, you can
+support development on Ko-fi:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/mrbaazzman)
+
 ## Legal
 
 This is an unofficial interoperability project. It is not affiliated with
