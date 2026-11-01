@@ -250,10 +250,10 @@ namespace Asphalt5Setup
                 patched += PatchGenerated(chunk, profile, out changed);
                 rewritten += changed;
             }
-            if (patched != 12)
+            if (patched != 13)
                 throw new InvalidOperationException(
-                    "Runtime patch targets missing (" + patched + "/12).");
-            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit/input patches (" + patched + "/12, " +
+                    "Runtime patch targets missing (" + patched + "/13).");
+            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit/input/display patches (" + patched + "/13, " +
                 rewritten + " rewritten)");
 
             progress("Compiling the game (this can take 10-20 minutes)...", 40);
@@ -585,7 +585,7 @@ namespace Asphalt5Setup
             return sb.ToString();
         }
 
-        /* Returns how many of the twelve patch targets occur in this chunk;
+        /* Returns how many of the thirteen patch targets occur in this chunk;
          * changed receives how many were actually rewritten.  The patch
          * targets can land in different functions_NN.c files. */
         private static int PatchGenerated(string path, ApkProfile profile, out int changed)
@@ -596,7 +596,7 @@ namespace Asphalt5Setup
             int found = 0;
             changed = 0;
             string[] cm;
-            string nitro, rotation, exit, labelFn, clickFn, actionFn, modeFn;
+            string nitro, rotation, exit, labelFn, clickFn, actionFn, modeFn, videoFn;
             int c;
             if (profile.Is341)
             {
@@ -609,6 +609,7 @@ namespace Asphalt5Setup
                 clickFn = "fn_000ee734";
                 actionFn = "fn_000ee5fc";
                 modeFn = "fn_00060a50";
+                videoFn = "fn_00114428";
             }
             else if (profile.Is337)
             {
@@ -621,6 +622,7 @@ namespace Asphalt5Setup
                 clickFn = "fn_000eeebc";
                 actionFn = "fn_000eed80";
                 modeFn = "fn_0007f988";
+                videoFn = "fn_00115268";
             }
             else
             {
@@ -633,6 +635,7 @@ namespace Asphalt5Setup
                 clickFn = "fn_00103698";
                 actionFn = "fn_0010359c";
                 modeFn = "fn_00093fd0";
+                videoFn = "fn_001287c8";
             }
             string[] cmWhy = new string[]
             {
@@ -684,6 +687,11 @@ namespace Asphalt5Setup
                               "Force accelerometer control scheme.",
                               "guest_force_control_mode");
             if (rm > 0) { found++; if (rm == 1) changed++; }
+            int rv = PatchOne(ref s, videoFn,
+                              "if (guest_video_menu_label(cpu)) return;",
+                              "Display settings entry in the Video menu.",
+                              "guest_video_menu_label");
+            if (rv > 0) { found++; if (rv == 1) changed++; }
             if (changed > 0) File.WriteAllText(path, s);
             return found;
         }

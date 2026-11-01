@@ -67,6 +67,10 @@ static int g_embedded, g_controls_seen, g_controls_active;
 static int g_remap_page, g_remap_action;
 static int g_controls_label;
 static DWORD g_controls_tick;
+static int g_page;
+static DWORD g_video_tick;
+static int g_display_desktop = 1, g_display_width, g_display_height;
+static int g_display_aspect = 1, g_display_vsync = 1, g_display_fps;
 static int g_capture, g_cap_act, g_cap_cat, g_cap_wait_release;
 static uint32_t g_label_guest[3];
 static int g_selected, g_col;
@@ -92,8 +96,90 @@ static int g_tex_dirty = 1;
 static RECT g_row[ACT_COUNT];
 static RECT g_cell_kb[ACT_COUNT], g_cell_pad[ACT_COUNT];
 static RECT g_reset, g_done;
+static RECT g_disp_row[3], g_disp_left[3], g_disp_right[3];
+static RECT g_disp_apply, g_disp_reset, g_disp_done;
+static int g_disp_sel, g_disp_mode_index, g_disp_aspect_index, g_disp_fps_index;
 static int g_capture_rect_valid;
 static RECT g_capture_rect;
+
+typedef struct { int w, h; } DispMode;
+static DispMode g_disp_modes[128];
+static int g_disp_mode_count;
+static const int g_disp_fps_values[] = { 0, 30, 60, 75, 90, 120, 144, 165, 240 };
+#define DISP_FPS_COUNT ((int)(sizeof(g_disp_fps_values) / sizeof(g_disp_fps_values[0])))
+
+static int disp_monitor_hz(void)
+{
+    DEVMODEA dm;
+    memset(&dm, 0, sizeof(dm));
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsA(NULL, ENUM_CURRENT_SETTINGS, &dm) &&
+        dm.dmDisplayFrequency > 1)
+        return (int)dm.dmDisplayFrequency;
+    return 60;
+}
+
+static void disp_add_mode(int w, int h)
+{
+    if (w < 640 || h < 480 || g_disp_mode_count >= 128) return;
+    for (int i = 0; i < g_disp_mode_count; i++)
+        if (g_disp_modes[i].w == w && g_disp_modes[i].h == h) return;
+    g_disp_modes[g_disp_mode_count].w = w;
+    g_disp_modes[g_disp_mode_count].h = h;
+    g_disp_mode_count++;
+}
+
+static void disp_enum_modes(void)
+{
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+    g_disp_mode_count = 0;
+    disp_add_mode(sw > 0 ? sw : 1920, sh > 0 ? sh : 1080);
+    {
+        DEVMODEA dm;
+        for (DWORD i = 0; EnumDisplaySettingsA(NULL, i, &dm); i++) {
+            if (dm.dmBitsPerPel >= 32)
+                disp_add_mode((int)dm.dmPelsWidth, (int)dm.dmPelsHeight);
+        }
+    }
+    {
+        static const int std[][2] = {
+            {1280,720}, {1366,768}, {1600,900}, {1680,1050},
+            {1920,1080}, {1920,1200}, {2560,1440}, {2560,1600},
+            {3440,1440}, {3840,2160}
+        };
+        for (int i = 0; i < (int)(sizeof(std) / sizeof(std[0])); i++)
+            if (std[i][0] <= sw && std[i][1] <= sh)
+                disp_add_mode(std[i][0], std[i][1]);
+    }
+    for (int i = 1; i < g_disp_mode_count; i++) {
+        DispMode key = g_disp_modes[i];
+        int j = i - 1;
+        while (j >= 1 &&
+               (int64_t)g_disp_modes[j].w * g_disp_modes[j].h <
+               (int64_t)key.w * key.h) {
+            g_disp_modes[j + 1] = g_disp_modes[j];
+            j--;
+        }
+        g_disp_modes[j + 1] = key;
+    }
+    g_disp_mode_index = 0;
+    if (!g_display_desktop) {
+        for (int i = 0; i < g_disp_mode_count; i++)
+            if (g_disp_modes[i].w == g_display_width &&
+                g_disp_modes[i].h == g_display_height) {
+                g_disp_mode_index = i;
+                break;
+            }
+    }
+    g_disp_aspect_index = g_display_aspect ? 0 : 1;
+    g_disp_fps_index = 0;
+    for (int i = 0; i < DISP_FPS_COUNT; i++)
+        if (g_disp_fps_values[i] == g_display_fps) {
+            g_disp_fps_index = i;
+            break;
+        }
+}
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                      */
@@ -391,6 +477,36 @@ static int parse_dinput(const char *s, Bind *b)
     return 0;
 }
 
+void input_map_read_display(int *w, int *h, int *desktop, int *aspect,
+                            int *vsync, int *fps)
+{
+    char path[MAX_PATH];
+    char line[512];
+    FILE *f;
+    int d = 1, ww = 0, hh = 0, a = 1, v = 1, ff = 0;
+    config_path(path, sizeof(path));
+    f = fopen(path, "r");
+    if (f) {
+        while (fgets(line, sizeof(line), f)) {
+            char *s = trim(line);
+            if (strncmp(s, "display_desktop=", 16) == 0) d = atoi(s + 16) ? 1 : 0;
+            else if (strncmp(s, "display_width=", 14) == 0) ww = atoi(s + 14);
+            else if (strncmp(s, "display_height=", 15) == 0) hh = atoi(s + 15);
+            else if (strncmp(s, "display_aspect=", 15) == 0) a = atoi(s + 15) ? 1 : 0;
+            else if (strncmp(s, "display_vsync=", 14) == 0) v = atoi(s + 14) ? 1 : 0;
+            else if (strncmp(s, "display_fps=", 12) == 0) ff = atoi(s + 12);
+        }
+        fclose(f);
+    }
+    if (ww < 320 || hh < 200) { ww = 0; hh = 0; }
+    if (w) *w = ww;
+    if (h) *h = hh;
+    if (desktop) *desktop = d;
+    if (aspect) *aspect = a;
+    if (vsync) *vsync = v;
+    if (fps) *fps = ff < 0 ? 0 : ff;
+}
+
 static void load_config(void)
 {
     char path[MAX_PATH];
@@ -424,6 +540,12 @@ static void load_config(void)
             }
             continue;
         }
+        if (strncmp(s, "display_desktop=", 16) == 0) { g_display_desktop = atoi(s + 16) ? 1 : 0; continue; }
+        if (strncmp(s, "display_width=", 14) == 0) { g_display_width = atoi(s + 14); continue; }
+        if (strncmp(s, "display_height=", 15) == 0) { g_display_height = atoi(s + 15); continue; }
+        if (strncmp(s, "display_aspect=", 15) == 0) { g_display_aspect = atoi(s + 15) ? 1 : 0; continue; }
+        if (strncmp(s, "display_vsync=", 14) == 0) { g_display_vsync = atoi(s + 14) ? 1 : 0; continue; }
+        if (strncmp(s, "display_fps=", 12) == 0) { g_display_fps = atoi(s + 12); continue; }
         if (section < 0) continue;
         val = strchr(s, '=');
         if (!val) continue;
@@ -502,6 +624,12 @@ static void save_config(void)
     if (!f) return;
     fprintf(f, "# Asphalt 5 Native input mapping\n");
     fprintf(f, "# key=..., xinput=any:Name, dinput={GUID}:button:N\n");
+    fprintf(f, "display_desktop=%d\n", g_display_desktop);
+    fprintf(f, "display_width=%d\n", g_display_width);
+    fprintf(f, "display_height=%d\n", g_display_height);
+    fprintf(f, "display_aspect=%d\n", g_display_aspect);
+    fprintf(f, "display_vsync=%d\n", g_display_vsync);
+    fprintf(f, "display_fps=%d\n\n", g_display_fps);
     for (int a = 0; a < ACT_COUNT; a++) {
         fprintf(f, "[%s]\n", act_section[a]);
         for (int cat = 0; cat < 2; cat++) {
@@ -1131,6 +1259,18 @@ static void first_bind(int cat, char *buf, size_t n)
     else bind_text(&l->b[0], buf, n);
 }
 
+int guest_video_menu_label(CPU *cpu)
+{
+    uint32_t id = cpu->r[1];
+    if (id == 0x4e4u || id == 0x4e2u || id == 0x4f7u || id == 0x5b7u)
+        g_video_tick = GetTickCount();
+    if (id == 0x4f7u) {
+        uint32_t p = label_slot(1, "DISPLAY SETTINGS");
+        if (p) { cpu->r[0] = p; return 1; }
+    }
+    return 0;
+}
+
 int guest_control_menu_label(CPU *cpu)
 {
     char buf[192];
@@ -1512,8 +1652,228 @@ static void draw_centered(HDC dc, const char *s, int y, int px, int italic,
     DeleteObject(f);
 }
 
+static void disp_apply(void)
+{
+    int w = 0, h = 0, desktop = 0;
+    int old_desktop = g_display_desktop;
+    int old_w = g_display_width, old_h = g_display_height;
+    if (g_disp_mode_index == 0) {
+        w = GetSystemMetrics(SM_CXSCREEN);
+        h = GetSystemMetrics(SM_CYSCREEN);
+        desktop = 1;
+    } else if (g_disp_mode_index < g_disp_mode_count) {
+        w = g_disp_modes[g_disp_mode_index].w;
+        h = g_disp_modes[g_disp_mode_index].h;
+    }
+    if (w < 320 || h < 200) return;
+    g_display_aspect = g_disp_aspect_index == 0;
+    g_display_fps = g_disp_fps_values[g_disp_fps_index];
+    g_display_vsync = g_display_fps == 0;
+    if (g_display_vsync) g_display_fps = 0;
+
+    if (desktop != old_desktop || w != old_w || h != old_h) {
+        g_display_desktop = desktop;
+        g_display_width = w;
+        g_display_height = h;
+        save_config();
+        if (MessageBoxA(g_host,
+                "The resolution change will be applied after restarting "
+                "Asphalt 5.\n\nRestart the game now?",
+                "Asphalt 5 - Display Settings",
+                MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) == IDYES) {
+            platform_restart();
+            return;
+        }
+        /* Cancelled: keep the current session at its current resolution. */
+        g_display_desktop = old_desktop;
+        g_display_width = old_w;
+        g_display_height = old_h;
+        save_config();
+        disp_enum_modes();
+        g_disp_sel = 0;
+        g_dirty = 1;
+        return;
+    }
+
+    platform_set_aspect_fit(g_display_aspect);
+    platform_set_vsync(g_display_vsync);
+    platform_set_frame_cap(g_display_vsync ? 0 : g_display_fps);
+    save_config();
+    g_dirty = 1;
+}
+
+static void disp_reset(void)
+{
+    g_display_desktop = 1;
+    g_display_width = 0;
+    g_display_height = 0;
+    g_display_aspect = 1;
+    g_display_vsync = 1;
+    g_display_fps = 0;
+    disp_enum_modes();
+    g_disp_sel = 0;
+    disp_apply();
+}
+
+static void disp_cycle(int row, int dir)
+{
+    if (row == 0) {
+        if (g_disp_mode_count > 0)
+            g_disp_mode_index = (g_disp_mode_index + dir + g_disp_mode_count) %
+                                g_disp_mode_count;
+    } else if (row == 1) {
+        g_disp_aspect_index ^= 1;
+    } else if (row == 2) {
+        g_disp_fps_index = (g_disp_fps_index + dir + DISP_FPS_COUNT) %
+                           DISP_FPS_COUNT;
+    }
+    g_dirty = 1;
+}
+
+static void compose_display(void)
+{
+    HDC dc = g_memdc;
+    int w = g_sw, h = g_sh;
+    int head_px = h * 30 / 1000;
+    int row_px = h * 24 / 1000;
+    int small_px = h * 17 / 1000;
+    int hz = disp_monitor_hz();
+    if (!dc || !g_pixels) return;
+
+    for (int y = 0; y < h; y += 3) {
+        float t = (float)y / (float)(h > 0 ? h : 1);
+        int r = (int)(4 + t * 5);
+        int g = (int)(18 + t * 17);
+        int b = (int)(33 + t * 30);
+        fill_rect(dc, 0, y, w, 3, RGB(r, g, b));
+    }
+    for (int i = 1; i < 12; i++)
+        line(dc, w * i / 12, 0, w * i / 12, h, RGB(8, 45, 65), 1);
+    for (int i = 1; i < 9; i++)
+        line(dc, 0, h * i / 9, w, h * i / 9, RGB(8, 45, 65), 1);
+    {
+        int m = 16;
+        frame_rect(dc, m, m, w - m * 2 - 1, h - m * 2 - 1, RGB(31, 182, 222), 2);
+        frame_rect(dc, m + 6, m + 6, w - m * 2 - 13, h - m * 2 - 13,
+                   RGB(8, 72, 96), 1);
+    }
+
+    draw_centered(dc, "DISPLAY SETTINGS", h * 45 / 1000, head_px, 1,
+                  RGB(255, 255, 255), w, 1);
+    draw_centered(dc, "PC VIDEO OPTIONS", h * 96 / 1000, small_px, 0,
+                  RGB(104, 181, 201), w, 0);
+
+    for (int i = 0; i < 3; i++) {
+        int ry = h * (21 + i * 14) / 100;
+        int rh = h * 9 / 100;
+        int label_x = w * 6 / 100;
+        int val_x = w * 39 / 100;
+        int val_w = w * 36 / 100;
+        int arrow_w = w * 5 / 100;
+        char value[128];
+        int selected = (i == g_disp_sel);
+        COLORREF edge = selected ? RGB(74, 238, 255) : RGB(22, 92, 120);
+        g_disp_row[i].left = w * 4 / 100;
+        g_disp_row[i].top = ry;
+        g_disp_row[i].right = w * 96 / 100;
+        g_disp_row[i].bottom = ry + rh;
+        g_disp_left[i].left = val_x - arrow_w;
+        g_disp_left[i].top = ry;
+        g_disp_left[i].right = val_x;
+        g_disp_left[i].bottom = ry + rh;
+        g_disp_right[i].left = val_x + val_w;
+        g_disp_right[i].top = ry;
+        g_disp_right[i].right = val_x + val_w + arrow_w;
+        g_disp_right[i].bottom = ry + rh;
+        fill_rect(dc, g_disp_row[i].left, ry,
+                  g_disp_row[i].right - g_disp_row[i].left, rh,
+                  selected ? RGB(16, 42, 68) : RGB(10, 30, 50));
+        frame_rect(dc, g_disp_row[i].left, ry,
+                   g_disp_row[i].right - g_disp_row[i].left, rh, edge, 1);
+        draw_text(dc, i == 0 ? "RESOLUTION" : (i == 1 ? "ASPECT" : "FRAME RATE"),
+                  label_x, ry + rh / 2 - row_px / 2, row_px, 1,
+                  selected ? RGB(255, 255, 255) : RGB(190, 224, 236),
+                  -1, 0, 0);
+        fill_rect(dc, g_disp_left[i].left, ry, arrow_w, rh, RGB(10, 32, 54));
+        fill_rect(dc, g_disp_right[i].left, ry, arrow_w, rh, RGB(10, 32, 54));
+        frame_rect(dc, g_disp_left[i].left, ry, arrow_w, rh, edge, 1);
+        frame_rect(dc, g_disp_right[i].left, ry, arrow_w, rh, edge, 1);
+        {
+            int cx = g_disp_left[i].left + arrow_w / 2;
+            int cy = ry + rh / 2 - row_px / 2;
+            draw_centered(dc, "<", cy, row_px, 0, RGB(220, 242, 250),
+                          cx * 2, 0);
+        }
+        {
+            int cx = g_disp_right[i].left + arrow_w / 2;
+            int cy = ry + rh / 2 - row_px / 2;
+            draw_centered(dc, ">", cy, row_px, 0, RGB(220, 242, 250),
+                          cx * 2, 0);
+        }
+        if (i == 0) {
+            if (g_disp_mode_index == 0)
+                snprintf(value, sizeof(value), "DESKTOP %dx%d",
+                         g_disp_modes[0].w, g_disp_modes[0].h);
+            else
+                snprintf(value, sizeof(value), "%dx%d",
+                         g_disp_modes[g_disp_mode_index].w,
+                         g_disp_modes[g_disp_mode_index].h);
+        } else if (i == 1) {
+            snprintf(value, sizeof(value), "%s",
+                     g_disp_aspect_index == 0 ? "FIT" : "STRETCH");
+        } else {
+            int fps = g_disp_fps_values[g_disp_fps_index];
+            if (fps == 0)
+                snprintf(value, sizeof(value), "MONITOR (%d Hz)", hz);
+            else
+                snprintf(value, sizeof(value), "%d FPS", fps);
+        }
+        draw_text(dc, value, val_x + val_w / 2,
+                  ry + rh / 2 - row_px / 2, row_px, 0,
+                  RGB(235, 248, 255), val_x + val_w / 2, val_w - 8, 0);
+    }
+
+    {
+        int bh = h * 7 / 100;
+        int by = h * 82 / 100;
+        int bw = w * 22 / 100;
+        int gap = w * 4 / 100;
+        int bx = (w - bw * 3 - gap * 2) / 2;
+        g_disp_reset.left = bx; g_disp_reset.top = by;
+        g_disp_reset.right = bx + bw; g_disp_reset.bottom = by + bh;
+        g_disp_apply.left = bx + bw + gap; g_disp_apply.top = by;
+        g_disp_apply.right = bx + bw * 2 + gap; g_disp_apply.bottom = by + bh;
+        g_disp_done.left = bx + (bw + gap) * 2; g_disp_done.top = by;
+        g_disp_done.right = bx + (bw + gap) * 2 + bw; g_disp_done.bottom = by + bh;
+        fill_rect(dc, g_disp_reset.left, by, bw, bh, RGB(12, 36, 58));
+        fill_rect(dc, g_disp_apply.left, by, bw, bh, RGB(24, 74, 104));
+        fill_rect(dc, g_disp_done.left, by, bw, bh, RGB(12, 36, 58));
+        frame_rect(dc, g_disp_reset.left, by, bw, bh, RGB(31, 112, 140), 2);
+        frame_rect(dc, g_disp_apply.left, by, bw, bh, RGB(74, 238, 255), 2);
+        frame_rect(dc, g_disp_done.left, by, bw, bh, RGB(31, 112, 140), 2);
+        {
+            int cx = (g_disp_reset.left + g_disp_reset.right) / 2;
+            draw_centered(dc, "RESET", by + bh / 2 - small_px / 2, small_px, 0,
+                          RGB(220, 238, 246), cx * 2, 0);
+        }
+        {
+            int cx = (g_disp_apply.left + g_disp_apply.right) / 2;
+            draw_centered(dc, "APPLY", by + bh / 2 - small_px / 2, small_px, 0,
+                          RGB(255, 255, 255), cx * 2, 0);
+        }
+        {
+            int cx = (g_disp_done.left + g_disp_done.right) / 2;
+            draw_centered(dc, "DONE", by + bh / 2 - small_px / 2, small_px, 0,
+                          RGB(220, 238, 246), cx * 2, 0);
+        }
+    }
+    draw_centered(dc, "LEFT/RIGHT CHANGE   -   ENTER APPLIES   -   ESC OR F2 CLOSES",
+                  h * 925 / 1000, small_px, 0, RGB(104, 181, 201), w, 0);
+}
+
 static void compose(void)
 {
+    if (g_page == 1) { compose_display(); return; }
     HDC dc = g_memdc;
     int w = g_sw, h = g_sh;
     int mx, table_y, row_h, action_x, kb_x, pad_x;
@@ -1752,6 +2112,7 @@ void input_map_draw(void)
     glDisable(GL_COLOR_LOGIC_OP);
     glColorMask(1, 1, 1, 1);
     glDepthMask(GL_FALSE);
+    glViewport(0, 0, platform_client_width(), platform_client_height());
     glMatrixMode(GL_PROJECTION);
     glPushMatrix();
     glLoadIdentity();
@@ -1778,6 +2139,20 @@ static void request_open(void)
     g_open_requested = 1;
 }
 
+static void overlay_open(int page);
+
+static void request_display(void)
+{
+    if (g_open) {
+        g_page = 1;
+        disp_enum_modes();
+        g_disp_sel = 0;
+        g_dirty = 1;
+        return;
+    }
+    overlay_open(1);
+}
+
 int input_map_overlay_open(void)
 {
     return g_open;
@@ -1787,36 +2162,48 @@ int input_map_try_stock_click(int x, int y)
 {
     int lw, lh;
     if (g_open || g_open_requested) return 0;
-    if ((DWORD)(GetTickCount() - g_controls_tick) > 500) return 0;
     lw = platform_logical_width();
     lh = platform_logical_height();
     if (lw < 1 || lh < 1) return 0;
-    if (lh <= 500) {
-        if (x < lw * 15 / 100 || x > lw * 70 / 100) return 0;
-        if (y >= lh * 40 / 100 && y < lh * 60 / 100) {
+    if ((DWORD)(GetTickCount() - g_video_tick) <= 500) {
+        /* The third Video row is repurposed as DISPLAY SETTINGS. */
+        if (x >= lw * 12 / 100 && x <= lw * 78 / 100 &&
+            y >= lh * 50 / 100 && y < lh * 68 / 100) {
+            request_display();
+            return 1;
+        }
+    }
+    if ((DWORD)(GetTickCount() - g_controls_tick) <= 500) {
+        if (lh <= 500) {
+            if (x >= lw * 15 / 100 && x <= lw * 70 / 100 &&
+                y >= lh * 40 / 100 && y < lh * 60 / 100) {
+                request_open();
+                return 1;
+            }
+        } else if (x >= lw * 22 / 100 && x <= lw * 66 / 100 &&
+                   y >= lh * 31 / 100 && y < lh * 45 / 100) {
             request_open();
             return 1;
         }
-        return 0;
-    }
-    if (x < lw * 22 / 100 || x > lw * 66 / 100) return 0;
-    if (y >= lh * 31 / 100 && y < lh * 45 / 100) {
-        request_open();
-        return 1;
     }
     return 0;
 }
 
-static void overlay_open(void)
+static void overlay_open(int page)
 {
     if (g_open) return;
     g_open_requested = 0;
     g_open = 1;
+    g_page = page;
     g_selected = 0;
     g_col = 0;
     g_hover_row = -1;
     g_hover_col = -1;
     g_hover_done = g_hover_reset = 0;
+    if (page == 1) {
+        disp_enum_modes();
+        g_disp_sel = 0;
+    }
     g_dirty = 1;
     create_surface(platform_client_width(), platform_client_height());
     menu_log("[overlay] open client=%dx%d surface=%dx%d", platform_client_width(), platform_client_height(), g_sw, g_sh);
@@ -1844,9 +2231,58 @@ void input_map_toggle(void)
     else request_open();
 }
 
+void input_map_toggle_display(void)
+{
+    if (g_open) {
+        if (g_page == 1) overlay_close();
+        else {
+            g_page = 1;
+            disp_enum_modes();
+            g_disp_sel = 0;
+            g_dirty = 1;
+        }
+    } else {
+        request_display();
+    }
+}
+
 static int point_in(const RECT *r, int x, int y)
 {
     return x >= r->left && x < r->right && y >= r->top && y < r->bottom;
+}
+
+static int display_handle_click(int x, int y)
+{
+    for (int i = 0; i < 3; i++) {
+        if (point_in(&g_disp_left[i], x, y)) {
+            g_disp_sel = i;
+            disp_cycle(i, -1);
+            return 1;
+        }
+        if (point_in(&g_disp_right[i], x, y)) {
+            g_disp_sel = i;
+            disp_cycle(i, 1);
+            return 1;
+        }
+        if (point_in(&g_disp_row[i], x, y)) {
+            g_disp_sel = i;
+            g_dirty = 1;
+            return 1;
+        }
+    }
+    if (point_in(&g_disp_apply, x, y)) {
+        disp_apply();
+        return 1;
+    }
+    if (point_in(&g_disp_reset, x, y)) {
+        disp_reset();
+        return 1;
+    }
+    if (point_in(&g_disp_done, x, y)) {
+        overlay_close();
+        return 1;
+    }
+    return 0;
 }
 
 static int hit_row(int x, int y, int *col)
@@ -1881,15 +2317,16 @@ static void update_hover(int x, int y)
 void input_map_pump(void)
 {
     if (g_input_suspended) { release_actions(); return; }
-    if (g_open_requested && !g_open) overlay_open();
+    if (g_open_requested && !g_open)
+        overlay_open(g_open_requested == 2 ? 1 : 0);
     read_xinput();
     di_poll();
 
     if (g_open) {
-        static int nav_up, nav_down, nav_left, nav_right, nav_a;
+        static int nav_up, nav_down, nav_left, nav_right, nav_a, nav_b;
         if (g_capture && g_cap_cat == 1) capture_poll();
         if (!g_capture) {
-            int up = 0, down = 0, left = 0, right = 0, a = 0;
+            int up = 0, down = 0, left = 0, right = 0, a = 0, b = 0;
             for (int i = 0; i < 4; i++) {
                 if (!g_xok[i]) continue;
                 const XINPUT_GAMEPAD *g = &g_xs[i].Gamepad;
@@ -1898,6 +2335,19 @@ void input_map_pump(void)
                 left |= (g->wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0 || g->sThumbLX < -20000;
                 right |= (g->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 || g->sThumbLX > 20000;
                 a |= (g->wButtons & XINPUT_GAMEPAD_A) != 0;
+                b |= (g->wButtons & XINPUT_GAMEPAD_B) != 0;
+            }
+            if (g_page == 1) {
+                if (up && !nav_up) { g_disp_sel = (g_disp_sel + 2) % 3; g_dirty = 1; }
+                if (down && !nav_down) { g_disp_sel = (g_disp_sel + 1) % 3; g_dirty = 1; }
+                if (left && !nav_left) disp_cycle(g_disp_sel, -1);
+                if (right && !nav_right) disp_cycle(g_disp_sel, 1);
+                if (a && !nav_a) disp_apply();
+                if (b && !nav_b) overlay_close();
+                nav_up = up; nav_down = down; nav_left = left;
+                nav_right = right; nav_a = a; nav_b = b;
+                release_actions();
+                return;
             }
             if (g_cap_wait_release) {
                 if (!controller_buttons_down()) g_cap_wait_release = 0;
@@ -1944,6 +2394,19 @@ int input_map_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
         if (lp & (1 << 30)) return 1;
+        if (g_page == 1) {
+            if (wp == VK_ESCAPE || wp == VK_F1 || wp == VK_F2) {
+                overlay_close();
+                return 1;
+            }
+            if (wp == VK_UP) { g_disp_sel = (g_disp_sel + 2) % 3; g_dirty = 1; }
+            else if (wp == VK_DOWN) { g_disp_sel = (g_disp_sel + 1) % 3; g_dirty = 1; }
+            else if (wp == VK_LEFT) disp_cycle(g_disp_sel, -1);
+            else if (wp == VK_RIGHT) disp_cycle(g_disp_sel, 1);
+            else if (wp == VK_RETURN || wp == VK_SPACE) disp_apply();
+            else if (wp == 'R') disp_reset();
+            return 1;
+        }
         if (g_capture) {
             if (wp == VK_ESCAPE) {
                 cancel_capture();
@@ -1985,6 +2448,10 @@ int input_map_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 1;
     case WM_LBUTTONDOWN:
         x = GET_X_LPARAM(lp); y = GET_Y_LPARAM(lp);
+        if (g_page == 1) {
+            if (g_capture) cancel_capture();
+            return display_handle_click(x, y);
+        }
         row = hit_row(x, y, &col);
         menu_log("[overlay] click %d,%d row=%d col=%d cap=%d", x, y, row, col, g_capture);
         if (g_capture) { cancel_capture(); return 1; }

@@ -438,6 +438,11 @@ uint32_t jni_env_addr(void);
 
 /* Win32/WGL platform + GLES1 compatibility */
 int  platform_init(int width, int height);
+void platform_set_resolution(int w, int h);
+void platform_set_vsync(int v);
+void platform_set_aspect_fit(int v);
+void platform_set_frame_cap(int cap);
+void platform_restart(void);
 void platform_set_cpu(CPU *cpu);
 void platform_pump(void);
 int  platform_is_player_car(uint32_t car);
@@ -454,6 +459,7 @@ int  platform_logical_height(void);
 
 /* Host hooks for the engine's controls page. */
 int  guest_control_menu_label(CPU *cpu);
+int  guest_video_menu_label(CPU *cpu);
 int  guest_force_control_mode(CPU *cpu);
 int  guest_control_menu_action(CPU *cpu);
 int  guest_control_menu_bar_action(CPU *cpu);

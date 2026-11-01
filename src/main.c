@@ -2,6 +2,7 @@
 #include "guest.h"
 #include "platform/movie.h"
 #include "platform/data_install.h"
+#include "platform/input_map.h"
 
 #include <windows.h>
 #include <mmsystem.h>
@@ -289,37 +290,43 @@ static int camera_smooth_active(void)
     return g_game_sym && game_in_run(g_game_sym);
 }
 
+static int g_frame_cap;
+
+void platform_set_frame_cap(int cap)
+{
+    if (cap < 0) cap = 0;
+    g_frame_cap = cap;
+}
+
 static void frame_limit(int frame, uint32_t gsym)
 {
-    static int cap = -1, cap_start;
+    static int cap_start = -1;
+    static int active_cap = -1;
     static LARGE_INTEGER freq;
     static double next;
     static HANDLE timer;
     static int timer_tried;
     (void)gsym;
-    if (cap < 0) {
-        const char *env = getenv("RECOMP_FPS");
+    if (cap_start < 0) {
         const char *start = getenv("RECOMP_FPS_START");
         cap_start = start ? atoi(start) : 0;
-        cap = env ? atoi(env) : 0;
-        if (cap < 0) cap = 0;
         if (cap_start < 0) cap_start = 0;
-        if (cap > 0) {
-            timeBeginPeriod(1);
-            fprintf(stderr, "[win] frame cap %d FPS%s\n", cap,
-                    cap_start ? " (delayed)" : "");
-        } else {
-            fprintf(stderr, "[win] frame cap off (unlimited)\n");
-        }
     }
-    if (cap <= 0 || frame < cap_start) return;
+    if (g_frame_cap != active_cap) {
+        active_cap = g_frame_cap;
+        next = 0.0;
+        if (active_cap > 0) timeBeginPeriod(1);
+        fprintf(stderr, "[win] frame cap %d FPS%s\n", active_cap,
+                cap_start ? " (delayed)" : "");
+    }
+    if (active_cap <= 0 || frame < cap_start) return;
     if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
 
     LARGE_INTEGER q;
     QueryPerformanceCounter(&q);
     double now = (double)q.QuadPart / (double)freq.QuadPart;
     if (next <= 0.0) next = now;
-    next += 1.0 / (double)cap;
+    next += 1.0 / (double)active_cap;
     if (!timer_tried) {
         timer_tried = 1;
         /* Dynamic lookup keeps the installer's slim headers happy on
@@ -606,13 +613,17 @@ static int run_boot(const char *so)
 
     SetProcessDPIAware();
     int win_w = 1920, win_h = 1080;
+    int disp_aspect = 1, disp_vsync = 1, disp_fps = 0;
     {
+        int dw = 0, dh = 0, ddesktop = 1;
         int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-        if (sw > 0 && sh > 0) {
-            int th = sh < 1080 ? sh : 1080;
-            int tw = th * 16 / 9;
-            if (tw > sw) { tw = sw; th = tw * 9 / 16; }
-            if (tw >= 854 && th >= 480) { win_w = tw; win_h = th; }
+        input_map_read_display(&dw, &dh, &ddesktop, &disp_aspect,
+                               &disp_vsync, &disp_fps);
+        win_w = sw > 0 ? sw : 1920;
+        win_h = sh > 0 ? sh : 1080;
+        if (!ddesktop && dw >= 320 && dh >= 200) {
+            win_w = dw;
+            win_h = dh;
         }
     }
     {
@@ -622,25 +633,22 @@ static int run_boot(const char *so)
         if (res) sscanf(res, "%dx%d", &win_w, &win_h);
         if (ew) win_w = atoi(ew);
         if (eh) win_h = atoi(eh);
-        if (!res && !ew && !eh && is337) {
-            int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-            if (sw >= 1920 && sh >= 1080) {
-                win_w = 1920; win_h = 1080;
-            } else if (sw >= 1536 && sh >= 900) {
-                win_w = 1536; win_h = 900;
-            } else {
-                win_w = sw > 0 ? sw : 1920;
-                win_h = sh > 0 ? sh : 1080;
-            }
-        }
         if (win_w < 320) win_w = 320;
         if (win_h < 200) win_h = 200;
         if (win_w > 7680) win_w = 7680;
         if (win_h > 4320) win_h = 4320;
     }
+    {
+        const char *fps = getenv("RECOMP_FPS");
+        if (fps) { disp_fps = atoi(fps); disp_vsync = 0; }
+        if (getenv("RECOMP_NO_VSYNC")) disp_vsync = 0;
+    }
     fprintf(stderr, "[boot] resolution %dx%d logical %dx%d\n",
             win_w, win_h, logical_w, logical_h);
     if (platform_init(win_w, win_h) != 0) return 7;
+    platform_set_vsync(disp_vsync);
+    platform_set_frame_cap(disp_vsync ? 0 : disp_fps);
+    platform_set_aspect_fit(disp_aspect);
     platform_set_cpu(&cpu);
 
     fprintf(stderr, "[boot] running init_array\n");
@@ -745,7 +753,8 @@ static int run_boot(const char *so)
             }
             for (int i = 0; i < ntaps; i++) {
                 if (frame == taps[i].f) {
-                    tap_guest(&cpu, "notifyTouchPress", taps[i].x, taps[i].y);
+                    if (!input_map_try_stock_click(taps[i].x, taps[i].y))
+                        tap_guest(&cpu, "notifyTouchPress", taps[i].x, taps[i].y);
                     fprintf(stderr, "[tap] press %d,%d at frame %d\n", taps[i].x, taps[i].y, frame);
                 } else if (frame == taps[i].f + 3) {
                     tap_guest(&cpu, "notifyTouchReleased", taps[i].x, taps[i].y);

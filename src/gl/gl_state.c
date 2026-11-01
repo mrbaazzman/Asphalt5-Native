@@ -120,17 +120,29 @@ static void scale_view_rect(int *x, int *y, int *w, int *h)
     int cw = g_client_w, ch = g_client_h;
     int lw = g_logical_w > 0 ? g_logical_w : 854;
     int lh = g_logical_h > 0 ? g_logical_h : 480;
+    int vx = 0, vy = 0, vw = cw, vh = ch;
     if (cw < 1 || ch < 1 || (cw == lw && ch == lh)) return;
-    int nx = (int)((int64_t)*x * cw / lw);
-    int ny = (int)((int64_t)*y * ch / lh);
-    int nw = (int)((int64_t)*w * cw / lw);
-    int nh = (int)((int64_t)*h * ch / lh);
-    if (nx < 0) nx = 0;
-    if (ny < 0) ny = 0;
+    if (g_aspect_fit) {
+        if ((int64_t)cw * lh > (int64_t)ch * lw) {
+            vw = (int)((int64_t)ch * lw / lh);
+            vh = ch;
+        } else {
+            vw = cw;
+            vh = (int)((int64_t)cw * lh / lw);
+        }
+        vx = (cw - vw) / 2;
+        vy = (ch - vh) / 2;
+    }
+    int nx = vx + (int)((int64_t)*x * vw / lw);
+    int ny = vy + (int)((int64_t)*y * vh / lh);
+    int nw = (int)((int64_t)*w * vw / lw);
+    int nh = (int)((int64_t)*h * vh / lh);
+    if (nx < vx) nx = vx;
+    if (ny < vy) ny = vy;
     if (nw < 0) nw = 0;
     if (nh < 0) nh = 0;
-    if (nx + nw > cw) nw = cw - nx;
-    if (ny + nh > ch) nh = ch - ny;
+    if (nx + nw > vx + vw) nw = vx + vw - nx;
+    if (ny + nh > vy + vh) nh = vy + vh - ny;
     *x = nx; *y = ny; *w = nw; *h = nh;
 }
 

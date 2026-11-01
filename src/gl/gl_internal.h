@@ -100,6 +100,7 @@ extern HGLRC g_hrc;
 extern int g_win_w, g_win_h;
 extern int g_client_w, g_client_h;
 extern int g_logical_w, g_logical_h;
+extern int g_aspect_fit;
 extern int g_quit;
 extern CPU *g_cpu;
 extern int g_mouse_down;

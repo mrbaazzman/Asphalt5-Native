@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.3.0 - 2026-11-01
+
+- Added a native Display Settings page under OPTIONS -> VIDEO. The Camera
+  row now opens it; the camera can still be changed in a race with the
+  configured Camera button.
+- Resolution: monitor-native by default, with the monitor's modes plus
+  common 720p, 1080p, 16:10, 1440p, ultrawide and 4K sizes. The chosen mode
+  is presented as a borderless, centred window. Applying a different
+  resolution asks to restart the game, then relaunches it automatically.
+- Aspect: Fit (black bars, preserves the game's logical aspect) or Stretch.
+  Aspect and frame-rate changes apply immediately without a restart.
+- Frame rate: Monitor / VSync (shows the current refresh rate) or manual
+  30/60/75/90/120/144/165/240 FPS.
+- Display settings persist in `%LOCALAPPDATA%\Asphalt5\input.ini`; F2 opens
+  the same display page directly.
+- Fixed the 3.3.7 Display Settings row click area so a normal centre click
+  opens the page.
+- The game's startup resolution now defaults to the monitor's native mode
+  instead of a 1080p cap.
+
 ## 2.2.2 - 2026-11-01
 
 - Fixed the white loading and Options backgrounds on 3.4.1. The JNI

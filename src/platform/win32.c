@@ -433,6 +433,34 @@ void platform_request_exit(void)
     if (g_hwnd) PostMessageA(g_hwnd, WM_CLOSE, 0, 0);
 }
 
+void platform_restart(void)
+{
+    char exe[MAX_PATH];
+    char dir[MAX_PATH];
+    char cmd[4096];
+    char *slash;
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    DWORD n = GetModuleFileNameA(NULL, exe, sizeof(exe));
+    if (n == 0 || n >= sizeof(exe)) {
+        platform_request_exit();
+        return;
+    }
+    snprintf(dir, sizeof(dir), "%s", exe);
+    slash = strrchr(dir, '\\');
+    if (slash) *slash = 0;
+    snprintf(cmd, sizeof(cmd), "%s", GetCommandLineA());
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    memset(&pi, 0, sizeof(pi));
+    fprintf(stderr, "[win] restarting %s\n", exe);
+    if (CreateProcessA(exe, cmd, NULL, NULL, FALSE, 0, NULL, dir, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+    }
+    ExitProcess(0);
+}
+
 /* Mouse race zones (game coordinates, 854x480). */
 enum { ZONE_NONE, ZONE_STEER_L, ZONE_STEER_R, ZONE_BRAKE, ZONE_NITRO };
 static int g_zone;
@@ -774,6 +802,11 @@ LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 {
     if (msg == WM_LBUTTONDOWN && !input_map_overlay_open())
         platform_note_click((int)(short)LOWORD(lp), (int)(short)HIWORD(lp));
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_F2 &&
+        !(lp & (1 << 30))) {
+        input_map_toggle_display();
+        return 0;
+    }
     if (input_map_handle_message(h, msg, wp, lp))
         return 0;
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_F1 &&
@@ -841,10 +874,12 @@ int platform_init(int width, int height)
     /* A bordered 1920x1080 client does not fit on a 1080p desktop; use a
      * borderless top-left window when the requested client fills the screen. */
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-    int borderless = (width >= sw || height >= sh);
-    DWORD style = borderless ? WS_POPUP : WS_OVERLAPPEDWINDOW;
-    int px = borderless ? 0 : CW_USEDEFAULT;
-    int py = borderless ? 0 : CW_USEDEFAULT;
+    int borderless = 1;
+    DWORD style = WS_POPUP;
+    int px = (sw - width) / 2;
+    int py = (sh - height) / 2;
+    if (px < 0) px = 0;
+    if (py < 0) py = 0;
     RECT r = { 0, 0, width, height };
     AdjustWindowRect(&r, style, FALSE);
     g_win_w = r.right - r.left; g_win_h = r.bottom - r.top;
@@ -893,6 +928,35 @@ int platform_init(int width, int height)
     fprintf(stderr, "[win] %dx%d client, GL %s\n", width, height,
             (const char *)glGetString(GL_VERSION));
     return 0;
+}
+
+
+void platform_set_resolution(int w, int h)
+{
+    if (!g_hwnd || w < 320 || h < 200) return;
+    int sw = GetSystemMetrics(SM_CXSCREEN);
+    int sh = GetSystemMetrics(SM_CYSCREEN);
+    int x = (sw - w) / 2;
+    int y = (sh - h) / 2;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    SetWindowLongA(g_hwnd, GWL_STYLE, WS_POPUP);
+    SetWindowPos(g_hwnd, HWND_TOP, x, y, w, h,
+                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    g_win_w = w; g_win_h = h;
+    g_client_w = w; g_client_h = h;
+    fprintf(stderr, "[win] resolution %dx%d\n", w, h);
+}
+
+void platform_set_vsync(int v)
+{
+    if (pwglSwapIntervalEXT)
+        pwglSwapIntervalEXT(v ? 1 : 0);
+}
+
+void platform_set_aspect_fit(int v)
+{
+    g_aspect_fit = v ? 1 : 0;
 }
 
 
@@ -1269,10 +1333,76 @@ void platform_pump(void)
 }
 
 
+static void draw_aspect_bars(void)
+{
+    int cw, ch, lw, lh, vw, vh, vx, vy;
+    if (!g_aspect_fit) return;
+    cw = g_client_w; ch = g_client_h;
+    if (cw < 1 || ch < 1) return;
+    lw = g_logical_w > 0 ? g_logical_w : 854;
+    lh = g_logical_h > 0 ? g_logical_h : 480;
+    vw = cw; vh = ch;
+    if ((int64_t)cw * lh > (int64_t)ch * lw) {
+        vw = (int)((int64_t)ch * lw / lh);
+        vh = ch;
+    } else {
+        vw = cw;
+        vh = (int)((int64_t)cw * lh / lw);
+    }
+    vx = (cw - vw) / 2;
+    vy = (ch - vh) / 2;
+    if (vx <= 0 && vy <= 0) return;
+    glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT |
+                 GL_VIEWPORT_BIT | GL_TRANSFORM_BIT | GL_TEXTURE_BIT |
+                 GL_SCISSOR_BIT | GL_CURRENT_BIT);
+    glDisable(GL_TEXTURE_2D);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_ALPHA_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_COLOR_LOGIC_OP);
+    glColorMask(1, 1, 1, 1);
+    glDepthMask(GL_FALSE);
+    glViewport(0, 0, cw, ch);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(0, cw, 0, ch, -1, 1);
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+    glColor4f(0, 0, 0, 1);
+    glBegin(GL_QUADS);
+    if (vx > 0) {
+        glVertex2i(0, 0); glVertex2i(vx, 0);
+        glVertex2i(vx, ch); glVertex2i(0, ch);
+    }
+    if (vx + vw < cw) {
+        glVertex2i(vx + vw, 0); glVertex2i(cw, 0);
+        glVertex2i(cw, ch); glVertex2i(vx + vw, ch);
+    }
+    if (vy > 0) {
+        glVertex2i(vx, 0); glVertex2i(vx + vw, 0);
+        glVertex2i(vx + vw, vy); glVertex2i(vx, vy);
+    }
+    if (vy + vh < ch) {
+        glVertex2i(vx, vy + vh); glVertex2i(vx + vw, vy + vh);
+        glVertex2i(vx + vw, ch); glVertex2i(vx, ch);
+    }
+    glEnd();
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopAttrib();
+}
+
 void platform_swap(void)
 {
     g_draw_serial = 0;
     g_swap_count++;
+    draw_aspect_bars();
     input_map_draw();
     capture_frame();
     scene_dump();

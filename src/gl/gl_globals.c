@@ -21,6 +21,7 @@ HGLRC g_hrc;
 int g_win_w = 854, g_win_h = 480;
 int g_client_w = 854, g_client_h = 480;
 int g_logical_w = 854, g_logical_h = 480;
+int g_aspect_fit = 1;
 int g_quit;
 CPU *g_cpu;
 int g_mouse_down;
