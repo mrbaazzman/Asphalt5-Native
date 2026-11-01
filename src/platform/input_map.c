@@ -598,6 +598,25 @@ static void guid_text(REFGUID g, char *out, size_t n)
         snprintf(out, n, "{00000000-0000-0000-0000-000000000000}");
 }
 
+static int name_has_ci(const char *hay, const char *needle)
+{
+    size_t n = strlen(needle);
+    if (!n) return 0;
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < n && hay[i]) {
+            unsigned char a = (unsigned char)hay[i];
+            unsigned char b = (unsigned char)needle[i];
+            if (a >= 'A' && a <= 'Z') a = (unsigned char)(a - 'A' + 'a');
+            if (b >= 'A' && b <= 'Z') b = (unsigned char)(b - 'A' + 'a');
+            if (a != b) break;
+            i++;
+        }
+        if (i == n) return 1;
+    }
+    return 0;
+}
+
 static BOOL CALLBACK enum_dev(LPCDIDEVICEINSTANCEA inst, LPVOID ctx)
 {
     DDevice *d;
@@ -608,6 +627,15 @@ static BOOL CALLBACK enum_dev(LPCDIDEVICEINSTANCEA inst, LPVOID ctx)
     d->guid = inst->guidInstance;
     guid_text(&inst->guidInstance, d->guid_text, sizeof(d->guid_text));
     snprintf(d->name, sizeof(d->name), "%s", inst->tszProductName);
+    /* An Xbox pad is already handled through XInput.  Do not also expose
+     * its legacy DirectInput duplicate, which otherwise binds a resting
+     * axis 0 as if the user had moved a wheel. */
+    if (name_has_ci(d->name, "xbox") || name_has_ci(d->name, "xinput") ||
+        name_has_ci(d->name, "x-box")) {
+        menu_log("[di] skip XInput duplicate: %s", d->name);
+        return DIENUM_CONTINUE;
+    }
+    menu_log("[di] accept: %s", d->name);
     if (FAILED(g_di->lpVtbl->CreateDevice(g_di, &inst->guidInstance, &d->dev, NULL)))
         return DIENUM_CONTINUE;
     if (FAILED(d->dev->lpVtbl->SetDataFormat(d->dev, &c_dfDIJoystick2)) ||
@@ -825,6 +853,10 @@ static void finish_capture(Bind b)
     g_dirty = 1;
 }
 
+static XINPUT_STATE g_cap_xbase[4];
+static DIJOYSTATE2 g_cap_dbase[MAX_DEV];
+static int g_cap_dbase_ok[MAX_DEV];
+
 static void begin_capture(int act, int cat)
 {
     menu_log("[cap] begin act=%d cat=%d pads=%d%d%d%d", act, cat,
@@ -832,8 +864,26 @@ static void begin_capture(int act, int cat)
     g_capture = 1;
     g_cap_act = act;
     g_cap_cat = cat;
-    g_cap_wait_release = (cat == 1);
+    /* A mouse or keyboard starts capture with no pad button held.  Only
+     * gamepad navigation needs to wait for the A press to be released. */
+    g_cap_wait_release = 0;
     g_cap_prev_key = 0;
+    read_xinput();
+    di_poll();
+    memcpy(g_cap_xbase, g_xs, sizeof(g_xs));
+    for (int i = 0; i < 4; i++) {
+        g_cap_xbase[i].Gamepad.wButtons = 0;
+        g_cap_xbase[i].Gamepad.bLeftTrigger = 0;
+        g_cap_xbase[i].Gamepad.bRightTrigger = 0;
+    }
+    memset(g_cap_dbase, 0, sizeof(g_cap_dbase));
+    memset(g_cap_dbase_ok, 0, sizeof(g_cap_dbase_ok));
+    for (int i = 0; i < g_ndev; i++) {
+        if (!g_dev[i].ok) continue;
+        g_cap_dbase[i] = g_dev[i].js;
+        memset(g_cap_dbase[i].rgbButtons, 0, sizeof(g_cap_dbase[i].rgbButtons));
+        g_cap_dbase_ok[i] = 1;
+    }
     release_actions();
     g_input_armed = 0;
     g_dirty = 1;
@@ -842,9 +892,25 @@ static void begin_capture(int act, int cat)
 static void cancel_capture(void)
 {
     g_capture = 0;
+    g_cap_wait_release = 1;
     g_input_armed = 0;
     release_actions();
     g_dirty = 1;
+}
+
+static int controller_buttons_down(void)
+{
+    for (int i = 0; i < 4; i++) {
+        if (!g_xok[i]) continue;
+        if (g_xs[i].Gamepad.wButtons) return 1;
+    }
+    for (int i = 0; i < g_ndev; i++) {
+        DDevice *d = &g_dev[i];
+        if (!d->ok) continue;
+        for (int j = 0; j < 128; j++)
+            if (d->js.rgbButtons[j] & 0x80) return 1;
+    }
+    return 0;
 }
 
 static int controller_any_down(void)
@@ -874,13 +940,10 @@ static void finish_controller(Bind b)
 static int capture_poll(void)
 {
     if (!g_capture) return 0;
-    if (g_cap_wait_release) {
-        if (!controller_any_down()) g_cap_wait_release = 0;
-        return 0;
-    }
 
     for (int i = 0; i < 4; i++) {
-        const XINPUT_GAMEPAD *g = &g_xs[i].Gamepad;
+        const XINPUT_GAMEPAD *g;
+        const XINPUT_GAMEPAD *base;
         static const struct { WORD mask; } btns[] = {
             { XINPUT_GAMEPAD_A }, { XINPUT_GAMEPAD_B }, { XINPUT_GAMEPAD_X },
             { XINPUT_GAMEPAD_Y }, { XINPUT_GAMEPAD_LEFT_SHOULDER },
@@ -891,39 +954,51 @@ static int capture_poll(void)
             { XINPUT_GAMEPAD_DPAD_RIGHT }
         };
         if (!g_xok[i]) continue;
+        g = &g_xs[i].Gamepad;
+        base = &g_cap_xbase[i].Gamepad;
         for (unsigned k = 0; k < sizeof(btns) / sizeof(btns[0]); k++) {
-            if (g->wButtons & btns[k].mask) {
+            if ((g->wButtons & btns[k].mask) &&
+                !(base->wButtons & btns[k].mask)) {
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_XBTN; b.slot = -1; b.code = btns[k].mask;
                 finish_controller(b);
                 return 1;
             }
         }
-        if (g->bLeftTrigger > 128) {
+        if (g->bLeftTrigger > 128 && base->bLeftTrigger <= 128) {
             Bind b; memset(&b, 0, sizeof(b));
             b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LT;
             finish_controller(b); return 1;
         }
-        if (g->bRightTrigger > 128) {
+        if (g->bRightTrigger > 128 && base->bRightTrigger <= 128) {
             Bind b; memset(&b, 0, sizeof(b));
             b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RT;
             finish_controller(b); return 1;
         }
-        if (g->sThumbLX < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_NEG; finish_controller(b); return 1; }
-        if (g->sThumbLX >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_POS; finish_controller(b); return 1; }
-        if (g->sThumbLY < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_NEG; finish_controller(b); return 1; }
-        if (g->sThumbLY >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_POS; finish_controller(b); return 1; }
-        if (g->sThumbRX < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_NEG; finish_controller(b); return 1; }
-        if (g->sThumbRX >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_POS; finish_controller(b); return 1; }
-        if (g->sThumbRY < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_NEG; finish_controller(b); return 1; }
-        if (g->sThumbRY >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_POS; finish_controller(b); return 1; }
+        {
+            int dx = (int)g->sThumbLX - (int)base->sThumbLX;
+            int dy = (int)g->sThumbLY - (int)base->sThumbLY;
+            int drx = (int)g->sThumbRX - (int)base->sThumbRX;
+            int dry = (int)g->sThumbRY - (int)base->sThumbRY;
+            if (dx > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_POS; finish_controller(b); return 1; }
+            if (dx < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_NEG; finish_controller(b); return 1; }
+            if (dy > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_POS; finish_controller(b); return 1; }
+            if (dy < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_NEG; finish_controller(b); return 1; }
+            if (drx > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_POS; finish_controller(b); return 1; }
+            if (drx < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_NEG; finish_controller(b); return 1; }
+            if (dry > 12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_POS; finish_controller(b); return 1; }
+            if (dry < -12000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_NEG; finish_controller(b); return 1; }
+        }
     }
 
     for (int i = 0; i < g_ndev; i++) {
         DDevice *d = &g_dev[i];
-        if (!d->ok) continue;
+        DIJOYSTATE2 *base;
+        if (!d->ok || !g_cap_dbase_ok[i]) continue;
+        base = &g_cap_dbase[i];
         for (int j = 0; j < 128; j++) {
-            if (d->js.rgbButtons[j] & 0x80) {
+            if ((d->js.rgbButtons[j] & 0x80) &&
+                !(base->rgbButtons[j] & 0x80)) {
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_DIBTN; b.slot = i; b.code = j;
                 snprintf(b.guid, sizeof(b.guid), "%s", d->guid_text);
@@ -932,17 +1007,19 @@ static int capture_poll(void)
         }
         for (int j = 0; j < 8; j++) {
             float v = di_axis(&d->js, j);
-            if (v > 0.6f || v < -0.6f) {
+            float bv = di_axis(base, j);
+            if (v - bv > 0.5f || v - bv < -0.5f) {
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_DIAXIS; b.slot = i; b.code = j;
-                b.sign = v < 0 ? -1 : 1;
+                b.sign = (v - bv) < 0 ? -1 : 1;
                 snprintf(b.guid, sizeof(b.guid), "%s", d->guid_text);
                 finish_controller(b); return 1;
             }
         }
         for (int j = 0; j < 4; j++) {
             int p = di_pov(&d->js, j);
-            if (p >= 0) {
+            int bp = di_pov(base, j);
+            if (p >= 0 && p != bp) {
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_DIPOV; b.slot = i; b.code = j; b.sign = p;
                 snprintf(b.guid, sizeof(b.guid), "%s", d->guid_text);
@@ -1783,10 +1860,10 @@ void input_map_pump(void)
     di_poll();
 
     if (g_open) {
-        static int nav_up, nav_down, nav_left, nav_right, nav_a, nav_b;
+        static int nav_up, nav_down, nav_left, nav_right, nav_a;
         if (g_capture && g_cap_cat == 1) capture_poll();
         if (!g_capture) {
-            int up = 0, down = 0, left = 0, right = 0, a = 0, b = 0;
+            int up = 0, down = 0, left = 0, right = 0, a = 0;
             for (int i = 0; i < 4; i++) {
                 if (!g_xok[i]) continue;
                 const XINPUT_GAMEPAD *g = &g_xs[i].Gamepad;
@@ -1795,16 +1872,21 @@ void input_map_pump(void)
                 left |= (g->wButtons & XINPUT_GAMEPAD_DPAD_LEFT) != 0 || g->sThumbLX < -20000;
                 right |= (g->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT) != 0 || g->sThumbLX > 20000;
                 a |= (g->wButtons & XINPUT_GAMEPAD_A) != 0;
-                b |= (g->wButtons & (XINPUT_GAMEPAD_B | XINPUT_GAMEPAD_START)) != 0;
             }
-            if (up && !nav_up) { if (--g_selected < 0) g_selected = ACT_COUNT - 1; g_dirty = 1; }
-            if (down && !nav_down) { if (++g_selected >= ACT_COUNT) g_selected = 0; g_dirty = 1; }
-            if (left && !nav_left) { g_col = 0; g_dirty = 1; }
-            if (right && !nav_right) { g_col = 1; g_dirty = 1; }
-            if (a && !nav_a) begin_capture(g_selected, g_col);
-            if (b && !nav_b) overlay_close();
+            if (g_cap_wait_release) {
+                if (!controller_buttons_down()) g_cap_wait_release = 0;
+            } else {
+                if (up && !nav_up) { if (--g_selected < 0) g_selected = ACT_COUNT - 1; g_dirty = 1; }
+                if (down && !nav_down) { if (++g_selected >= ACT_COUNT) g_selected = 0; g_dirty = 1; }
+                if (left && !nav_left) { g_col = 0; g_dirty = 1; }
+                if (right && !nav_right) { g_col = 1; g_dirty = 1; }
+                if (a && !nav_a) {
+                    begin_capture(g_selected, g_col);
+                    g_cap_wait_release = (g_cap_cat == 1);
+                }
+            }
             nav_up = up; nav_down = down; nav_left = left; nav_right = right;
-            nav_a = a; nav_b = b;
+            nav_a = a;
         }
         release_actions();
         return;

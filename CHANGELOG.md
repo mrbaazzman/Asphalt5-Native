@@ -23,6 +23,10 @@
   matter which column was clicked, so an Xbox pad is detected even when the
   row or keyboard cell starts the capture. XInput slot detection is logged
   with `RECOMP_INPUT_LOG=1`.
+- Xbox pads are handled through XInput only. Their legacy DirectInput
+  duplicate is skipped, so a resting axis can no longer steal a binding.
+  Controller B/Start presses do not close the mapper; close it with Done,
+  Esc or F1.
 - The overlay's Auto Accelerate, Reset Defaults and Done labels are centred in
   their buttons.
 - Fixed the 854x480 Controls-page row geometry used by 3.2.4 and 3.4.1, so
