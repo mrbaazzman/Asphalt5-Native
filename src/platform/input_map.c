@@ -73,6 +73,7 @@ static int g_selected, g_col;
 static int g_hover_row = -1, g_hover_col = -1;
 static int g_hover_done, g_hover_reset;
 static int g_input_armed = 1;
+static int g_input_suspended;
 
 static int g_prev[ACT_COUNT][2];
 static int g_cap_prev_key;
@@ -904,6 +905,22 @@ static void cancel_capture(void)
     g_input_armed = 0;
     release_actions();
     g_dirty = 1;
+}
+
+void input_map_set_active(int active)
+{
+    if (active) {
+        if (g_input_suspended) {
+            g_input_suspended = 0;
+            g_input_armed = 0;
+            release_actions();
+        }
+        return;
+    }
+    g_input_suspended = 1;
+    g_input_armed = 0;
+    release_actions();
+    if (g_capture) cancel_capture();
 }
 
 static int controller_buttons_down(void)
@@ -1863,6 +1880,7 @@ static void update_hover(int x, int y)
 
 void input_map_pump(void)
 {
+    if (g_input_suspended) { release_actions(); return; }
     if (g_open_requested && !g_open) overlay_open();
     read_xinput();
     di_poll();
@@ -1913,8 +1931,11 @@ int input_map_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     (void)hwnd;
 
     if (msg == WM_KILLFOCUS) {
-        release_actions();
-        g_input_armed = 0;
+        input_map_set_active(0);
+        return 0;
+    }
+    if (msg == WM_SETFOCUS) {
+        input_map_set_active(1);
         return 0;
     }
     if (!g_open) return 0;

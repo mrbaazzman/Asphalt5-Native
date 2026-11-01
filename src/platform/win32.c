@@ -1093,6 +1093,14 @@ static void hold_start_orientation(void)
     }
 }
 
+static int host_window_active(void)
+{
+    HWND fg = GetForegroundWindow();
+    if (!g_hwnd || !fg) return 0;
+    if (fg == g_hwnd) return 1;
+    return GetAncestor(fg, GA_ROOT) == GetAncestor(g_hwnd, GA_ROOT);
+}
+
 void platform_pump(void)
 {
     MSG msg;
@@ -1102,6 +1110,28 @@ void platform_pump(void)
         DispatchMessageA(&msg);
     }
     if (!g_cpu) return;
+
+    /* Never poll keyboard, gamepad, wheel or mouse input while another
+     * application owns the foreground window.  Polling GetAsyncKeyState /
+     * XInput globally would otherwise keep triggering menu clicks and
+     * sounds in the background. */
+    int active = host_window_active();
+    input_map_set_active(active);
+    if (!active) {
+        action_release_all();
+        race_touch_release();
+        if (g_mouse_down) {
+            touch("notifyTouchReleased", g_last_mx, g_last_my, 0);
+            g_mouse_down = 0;
+        }
+        if (g_zone) zone_set(ZONE_NONE);
+        nitro_up();
+        g_mouse_release_wait = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
+        host_pad_sync();
+        vox_audio_pump();
+        return;
+    }
+
     input_map_pump();
     if (input_map_overlay_open())
         return;                 /* the mapper owns mouse and keyboard */

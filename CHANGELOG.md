@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.1 - 2026-11-01
+
+- Fixed background/unfocused input. The game no longer polls keyboard,
+  mouse, XInput or DirectInput while another application is in the
+  foreground, so menu clicks and sounds no longer fire in the background.
+  Held inputs are released on focus loss and ignored until released after
+  focus returns.
+
 ## 2.2.0 - 2026-11-01
 
 - Added the PC input mapper. Open it with **F1** or **OPTIONS -> CONTROLS ->
