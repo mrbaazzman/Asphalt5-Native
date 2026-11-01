@@ -827,7 +827,8 @@ static void finish_capture(Bind b)
 
 static void begin_capture(int act, int cat)
 {
-    menu_log("[cap] begin act=%d cat=%d", act, cat);
+    menu_log("[cap] begin act=%d cat=%d pads=%d%d%d%d", act, cat,
+             g_xok[0], g_xok[1], g_xok[2], g_xok[3]);
     g_capture = 1;
     g_cap_act = act;
     g_cap_cat = cat;
@@ -864,9 +865,15 @@ static int controller_any_down(void)
     return 0;
 }
 
+static void finish_controller(Bind b)
+{
+    g_cap_cat = 1;
+    finish_capture(b);
+}
+
 static int capture_poll(void)
 {
-    if (!g_capture || g_cap_cat != 1) return 0;
+    if (!g_capture) return 0;
     if (g_cap_wait_release) {
         if (!controller_any_down()) g_cap_wait_release = 0;
         return 0;
@@ -888,28 +895,28 @@ static int capture_poll(void)
             if (g->wButtons & btns[k].mask) {
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_XBTN; b.slot = -1; b.code = btns[k].mask;
-                finish_capture(b);
+                finish_controller(b);
                 return 1;
             }
         }
         if (g->bLeftTrigger > 128) {
             Bind b; memset(&b, 0, sizeof(b));
             b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LT;
-            finish_capture(b); return 1;
+            finish_controller(b); return 1;
         }
         if (g->bRightTrigger > 128) {
             Bind b; memset(&b, 0, sizeof(b));
             b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RT;
-            finish_capture(b); return 1;
+            finish_controller(b); return 1;
         }
-        if (g->sThumbLX < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_NEG; finish_capture(b); return 1; }
-        if (g->sThumbLX >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_POS; finish_capture(b); return 1; }
-        if (g->sThumbLY < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_NEG; finish_capture(b); return 1; }
-        if (g->sThumbLY >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_POS; finish_capture(b); return 1; }
-        if (g->sThumbRX < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_NEG; finish_capture(b); return 1; }
-        if (g->sThumbRX >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_POS; finish_capture(b); return 1; }
-        if (g->sThumbRY < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_NEG; finish_capture(b); return 1; }
-        if (g->sThumbRY >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_POS; finish_capture(b); return 1; }
+        if (g->sThumbLX < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_NEG; finish_controller(b); return 1; }
+        if (g->sThumbLX >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LX_POS; finish_controller(b); return 1; }
+        if (g->sThumbLY < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_NEG; finish_controller(b); return 1; }
+        if (g->sThumbLY >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_LY_POS; finish_controller(b); return 1; }
+        if (g->sThumbRX < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_NEG; finish_controller(b); return 1; }
+        if (g->sThumbRX >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RX_POS; finish_controller(b); return 1; }
+        if (g->sThumbRY < -20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_NEG; finish_controller(b); return 1; }
+        if (g->sThumbRY >  20000) { Bind b; memset(&b, 0, sizeof(b)); b.kind = KIND_XAXIS; b.slot = -1; b.code = XA_RY_POS; finish_controller(b); return 1; }
     }
 
     for (int i = 0; i < g_ndev; i++) {
@@ -920,7 +927,7 @@ static int capture_poll(void)
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_DIBTN; b.slot = i; b.code = j;
                 snprintf(b.guid, sizeof(b.guid), "%s", d->guid_text);
-                finish_capture(b); return 1;
+                finish_controller(b); return 1;
             }
         }
         for (int j = 0; j < 8; j++) {
@@ -930,7 +937,7 @@ static int capture_poll(void)
                 b.kind = KIND_DIAXIS; b.slot = i; b.code = j;
                 b.sign = v < 0 ? -1 : 1;
                 snprintf(b.guid, sizeof(b.guid), "%s", d->guid_text);
-                finish_capture(b); return 1;
+                finish_controller(b); return 1;
             }
         }
         for (int j = 0; j < 4; j++) {
@@ -939,7 +946,7 @@ static int capture_poll(void)
                 Bind b; memset(&b, 0, sizeof(b));
                 b.kind = KIND_DIPOV; b.slot = i; b.code = j; b.sign = p;
                 snprintf(b.guid, sizeof(b.guid), "%s", d->guid_text);
-                finish_capture(b); return 1;
+                finish_controller(b); return 1;
             }
         }
     }
@@ -1532,8 +1539,8 @@ static void compose(void)
 
     if (g_capture) {
         const char *msg = g_cap_cat == 0 ?
-            "PRESS A KEY  -  ESC CANCELS  -  DELETE CLEARS" :
-            "PRESS A BUTTON OR MOVE AN AXIS  -  ESC CANCELS";
+            "PRESS A KEY, BUTTON OR AXIS  -  ESC CANCELS  -  DELETE CLEARS" :
+            "PRESS A BUTTON, AXIS OR KEY  -  ESC CANCELS";
         int bw = w * 62 / 100;
         int bh = h * 11 / 100;
         int bx = (w - bw) / 2;
@@ -1564,7 +1571,8 @@ static void compose(void)
                   g_hover_reset ? RGB(29, 67, 96) : RGB(13, 38, 59));
         frame_rect(dc, g_reset.left, g_reset.top, bw, bh,
                    g_hover_reset ? RGB(74, 238, 255) : RGB(31, 112, 140), 2);
-        draw_text(dc, "RESET DEFAULTS", g_reset.left,
+        draw_text(dc, "RESET DEFAULTS",
+                  (g_reset.left + g_reset.right) / 2,
                   by + bh / 2 - head_px / 2, head_px, 0, RGB(220, 238, 246),
                   (g_reset.left + g_reset.right) / 2, 0, 0);
 
@@ -1575,7 +1583,9 @@ static void compose(void)
                       g_hover_done ? RGB(48, 92, 122) : RGB(21, 53, 78));
             frame_rect(dc, g_done.left, g_done.top, bw, bh,
                        g_hover_done ? RGB(255, 120, 224) : RGB(54, 190, 218), 2);
-            draw_text(dc, "DONE", g_done.left, by + bh / 2 - head_px / 2,
+            draw_text(dc, "DONE",
+                      (g_done.left + g_done.right) / 2,
+                      by + bh / 2 - head_px / 2,
                       head_px, 0, RGB(255, 255, 255),
                       (g_done.left + g_done.right) / 2, 0, 0);
         } else {
@@ -1828,10 +1838,11 @@ int input_map_handle_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_capture = 0;
                 g_input_armed = 0;
                 g_dirty = 1;
-            } else if (g_cap_cat == 0) {
+            } else {
                 Bind b;
                 memset(&b, 0, sizeof(b));
                 b.kind = KIND_KEY; b.slot = -1; b.code = (int)wp;
+                g_cap_cat = 0;
                 finish_capture(b);
             }
             return 1;

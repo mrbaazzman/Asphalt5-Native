@@ -19,6 +19,12 @@
   clicking the Controls row opens the mapper without breaking the car-options
   Window Tint row. DirectInput is loaded dynamically and the builder includes
   the small import libraries it needs.
+- Capture now accepts either a keyboard key or a controller button/axis no
+  matter which column was clicked, so an Xbox pad is detected even when the
+  row or keyboard cell starts the capture. XInput slot detection is logged
+  with `RECOMP_INPUT_LOG=1`.
+- The overlay's Auto Accelerate, Reset Defaults and Done labels are centred in
+  their buttons.
 - Fixed the 854x480 Controls-page row geometry used by 3.2.4 and 3.4.1, so
   a click on CONFIGURE INPUT is recognised every time instead of falling
   through to the stock control-scheme toggle.
