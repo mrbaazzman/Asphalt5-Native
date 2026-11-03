@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.2 - 2026-11-03
+
+- Fixed missing in-game audio on 3.4.1. Its data pack stores the Ogg
+  Vorbis sound assets as `raw_*.glsnd`, while the audio bridge only looked
+  for `raw_*.ogg`. Both extensions are now loaded, including the
+  background sound predecode cache.
+
 ## 2.3.1 - 2026-11-03
 
 - Fixed career progress not saving on 3.3.7 and 3.4.1. New save files were

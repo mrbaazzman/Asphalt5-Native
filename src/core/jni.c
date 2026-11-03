@@ -327,10 +327,23 @@ static uint32_t resource_len(const char *name)
  * The engine's SoundManager calls the Java GLMediaPlayer static methods
  * (loadSound/playSound/...).  The Java layer is not present, so these calls
  * are routed to the native WinMM/stb_vorbis backend in audio.c.  The assets
- * are raw_%03d.ogg in GloftA5HD (the same fallback the Java code uses).
+ * are raw_%03d.ogg in GloftA5HD and raw_%03d.glsnd in the 3.4.1 data pack;
+ * both are Ogg Vorbis streams.
  * ----------------------------------------------------------------------- */
 
 static int g_audio_ready;
+
+static int audio_probe_dir(const char *dir)
+{
+    char probe[700];
+    snprintf(probe, sizeof(probe), "%s/raw_000.ogg", dir);
+    DWORD a = GetFileAttributesA(probe);
+    if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
+        return 1;
+    snprintf(probe, sizeof(probe), "%s/raw_000.glsnd", dir);
+    a = GetFileAttributesA(probe);
+    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+}
 
 static const char *audio_asset_dir(void)
 {
@@ -342,20 +355,12 @@ static const char *audio_asset_dir(void)
     static char chosen[512];
     if (chosen[0]) return chosen;
     const char *root = getenv("A5_DATA_DIR");
-    if (root && *root) {
-        char probe[600];
-        snprintf(probe, sizeof(probe), "%s/raw_000.ogg", root);
-        DWORD a = GetFileAttributesA(probe);
-        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
-            snprintf(chosen, sizeof(chosen), "%s", root);
-            return chosen;
-        }
+    if (root && *root && audio_probe_dir(root)) {
+        snprintf(chosen, sizeof(chosen), "%s", root);
+        return chosen;
     }
     for (int i = 0; i < (int)(sizeof(dirs) / sizeof(dirs[0])); i++) {
-        char probe[600];
-        snprintf(probe, sizeof(probe), "%s/raw_000.ogg", dirs[i]);
-        DWORD a = GetFileAttributesA(probe);
-        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (audio_probe_dir(dirs[i])) {
             snprintf(chosen, sizeof(chosen), "%s", dirs[i]);
             return chosen;
         }
@@ -385,6 +390,10 @@ static int audio_load_id(int id, int is_big)
     char path[700];
     snprintf(path, sizeof(path), "%s/raw_%03d.ogg", dir, id);
     FILE *f = fopen(path, "rb");
+    if (!f) {
+        snprintf(path, sizeof(path), "%s/raw_%03d.glsnd", dir, id);
+        f = fopen(path, "rb");
+    }
     if (!f) {
         if (getenv("A5_SND_DEBUG")) fprintf(stderr, "[snd] missing %s\n", path);
         return 0;

@@ -256,6 +256,11 @@ static DWORD WINAPI cache_worker(LPVOID param) {
         char path[MAX_PATH];
         snprintf(path, sizeof(path), "%s\\raw_%03d.ogg", s_asset_dir, id);
         FILE* f = fopen(path, "rb");
+        if (!f) {
+            /* 3.4.1 ships the same Ogg Vorbis data with a .glsnd suffix. */
+            snprintf(path, sizeof(path), "%s\\raw_%03d.glsnd", s_asset_dir, id);
+            f = fopen(path, "rb");
+        }
         if (!f) continue;
         fseek(f, 0, SEEK_END);
         long len = ftell(f);
