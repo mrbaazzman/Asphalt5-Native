@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.1 - 2026-11-03
+
+- Fixed career progress not saving on 3.3.7 and 3.4.1. New save files were
+  being routed to a fallback folder that did not exist, so `fopen("wb")`
+  failed silently. Saves now go to the current build's data folder
+  (`gamefiles/GloftA5HD337` or `gamefiles/GloftA5HD341`).
+- Added the 3.4.1 save package path
+  (`com.gameloft.android.GAND.GloftA5HD`) to the file mapping.
+
 ## 2.3.0 - 2026-11-01
 
 - Added a native Display Settings page under OPTIONS -> VIDEO. The Camera

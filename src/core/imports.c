@@ -216,7 +216,18 @@ static const char *game_data_root(void)
     return root;
 }
 
-static const char *map_path(const char *in, char *out, size_t cap)
+static const char *primary_data_dir(void)
+{
+#if defined(RECOMP_TARGET_341)
+    return "gamefiles/GloftA5HD341";
+#elif defined(RECOMP_TARGET_337)
+    return "gamefiles/GloftA5HD337";
+#else
+    return "gamefiles/GloftA5HD";
+#endif
+}
+
+static const char *map_path(const char *in, const char *mode, char *out, size_t cap)
 {
     static const char kGameDir337[] = "/sdcard/gameloft/games/asphalt5/";
     static const char kGameRoot337[] = "/sdcard/gameloft/games/asphalt5";
@@ -224,9 +235,15 @@ static const char *map_path(const char *in, char *out, size_t cap)
         "/data/data/com.gameloft.android.ANMP.GloftAsphalt5.asphalt5/";
     static const char kDataRoot337[] =
         "/data/data/com.gameloft.android.ANMP.GloftAsphalt5.asphalt5";
+    static const char kDataDir341[] =
+        "/data/data/com.gameloft.android.GAND.GloftA5HD/";
+    static const char kDataRoot341[] =
+        "/data/data/com.gameloft.android.GAND.GloftA5HD";
     static const char kGameDir[] = "/sdcard/gameloft/games/GloftA5HD/";
     static const char kGameRoot[] = "/sdcard/gameloft/games/";
     const char *p = in;
+    int writing = mode && (strchr(mode, 'w') || strchr(mode, 'a') ||
+                           strchr(mode, '+'));
 
     if (!strncmp(p, kGameDir337, sizeof(kGameDir337) - 1))
         p += sizeof(kGameDir337) - 1;
@@ -236,6 +253,10 @@ static const char *map_path(const char *in, char *out, size_t cap)
         p += sizeof(kDataDir337) - 1;
     else if (!strncmp(p, kDataRoot337, sizeof(kDataRoot337) - 1))
         p += sizeof(kDataRoot337) - 1;
+    else if (!strncmp(p, kDataDir341, sizeof(kDataDir341) - 1))
+        p += sizeof(kDataDir341) - 1;
+    else if (!strncmp(p, kDataRoot341, sizeof(kDataRoot341) - 1))
+        p += sizeof(kDataRoot341) - 1;
     else if (!strncmp(p, kGameDir, sizeof(kGameDir) - 1))
         p += sizeof(kGameDir) - 1;
     else if (!strncmp(p, kGameRoot, sizeof(kGameRoot) - 1))
@@ -249,7 +270,14 @@ static const char *map_path(const char *in, char *out, size_t cap)
         const char *root = game_data_root();
         if (root) {
             snprintf(out, cap, "%s/%s", root, p);
-            if (path_exists(out)) return out;
+            if (writing || path_exists(out)) return out;
+        }
+        /* New files (career saves and replays) must be created inside the
+         * current build's data folder.  Probing for an existing file first
+         * would fall through to the wrong layout and fopen("wb") would fail. */
+        if (writing) {
+            snprintf(out, cap, "%s/%s", primary_data_dir(), p);
+            return out;
         }
         /* 3.4.1, then 3.3.7, then the preserved 3.2.4 layout. */
         snprintf(out, cap, "gamefiles/GloftA5HD341/%s", p);
@@ -261,6 +289,7 @@ static const char *map_path(const char *in, char *out, size_t cap)
         if (!path_exists(out)) snprintf(out, cap, "gamefiles/GloftA5HD/%s", p);
         if (!path_exists(out)) snprintf(out, cap, "assets/GloftA5HD/%s", p);
         if (!path_exists(out)) snprintf(out, cap, "GloftA5HD/%s", p);
+        if (!path_exists(out)) snprintf(out, cap, "%s/%s", primary_data_dir(), p);
         return out;
     }
 
@@ -463,12 +492,17 @@ void import_dispatch(CPU *cpu, const char *name)
     if (!strcmp(name, "fflush")) { FILE *f = file_get(a0); if (f) fflush(f); cpu->r[0] = 0; return; }
     if (!strcmp(name, "fopen")) {
         const char *in = guest_cstr(a0);
-        const char *p = map_path(in, g_fopen_path, sizeof(g_fopen_path));
-        FILE *f = fopen(p, guest_cstr(a1));
+        const char *mode = guest_cstr(a1);
+        const char *p = map_path(in, mode, g_fopen_path, sizeof(g_fopen_path));
+        FILE *f = fopen(p, mode);
         if (getenv("A5_SND_DEBUG") && (strstr(in, "raw_") || strstr(in, ".ogg")))
             fprintf(stderr, "[fopen] %s -> %s (%s) = %p\n", in, p,
-                    guest_cstr(a1), (void *)f);
+                    mode, (void *)f);
         if (f && g_verbose) fprintf(stderr, "[file] %s -> %s\n", in, p);
+        if (!f && mode && (strchr(mode, 'w') || strchr(mode, 'a') ||
+                           strchr(mode, '+')))
+            fprintf(stderr, "[file] write failed: %s -> %s (%s)\n",
+                    in, p, mode);
         cpu->r[0] = f ? file_handle(f) : 0; return;
     }
     if (!strcmp(name, "fclose")) { FILE *f = file_get(a0); if (f && f != stdout && f != stderr) { fclose(f); for (int i=0;i<MAX_FILES;i++) if (g_files[i]==f) g_files[i]=NULL; } cpu->r[0]=0; return; }
