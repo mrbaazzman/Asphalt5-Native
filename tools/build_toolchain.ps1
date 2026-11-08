@@ -63,6 +63,7 @@ try {
         'libm.a', 'libkernel32.a', 'libuser32.a', 'libgdi32.a', 'libopengl32.a', 'libwinmm.a',
         'libws2_32.a', 'libadvapi32.a', 'libshell32.a', 'libuuid.a', 'libole32.a',
         'libmfplat.a', 'libmfreadwrite.a', 'libmfuuid.a',
+        'libdinput8.a', 'libdxguid.a',
         'libpthread.a', 'libpthread.dll.a',
         'libwininet.a', 'libbcrypt.a', 'libcomctl32.a', 'libcomdlg32.a',
         'libcomdlg32.a', 'libmoldname.a'

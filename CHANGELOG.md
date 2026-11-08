@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.3.3 - 2026-11-08
+
+- Fixed installs failing at the final link, which left the install folder
+  without `Asphalt5.exe` (reported as "nothing in the game folder").
+  The bundled builder toolchain was missing `libdinput8.a` and
+  `libdxguid.a`, and the game asked the linker for static `-lwinpthread`
+  while only `libpthread.a` is packaged. The setup now links with
+  `-static`, so the implicit pthread runtime is resolved from
+  `libpthread.a` instead of emitting a `libwinpthread-1.dll` import, and
+  the toolchain includes the DirectInput and DirectX GUID import
+  libraries.
+
 ## 2.3.2 - 2026-11-03
 
 - Fixed missing in-game audio on 3.4.1. Its data pack stores the Ogg
