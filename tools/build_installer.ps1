@@ -1,7 +1,10 @@
 #!/usr/bin/env pwsh
 # Build the WinForms installer with the .NET Framework compiler that ships
-# with Windows.  No Visual Studio / build tools are needed by end users; this
-# script is only for producing dist/Asphalt5Setup.exe.
+# with Windows.  Embeds only the pre-built engine binaries (build/engines.zip)
+# and README.txt; no MinGW toolchain, Python runtime, PyInstaller, or XOR
+# obfuscation is used.
+#
+# Usage: powershell -ExecutionPolicy Bypass -File tools/build_installer.ps1
 
 param(
     [string]$Out = "build/Asphalt5Setup.exe"
@@ -26,31 +29,27 @@ $outPath = Join-Path $root $Out
 New-Item -ItemType Directory -Force (Split-Path -Parent $outPath) | Out-Null
 if (Test-Path $outPath) { Remove-Item $outPath -Force }
 
-$resArgs = @()
-$builderZip = Join-Path $root 'build/builder.zip'
-$builderDat = Join-Path $root 'build/builder.dat'
-if (Test-Path $builderDat) { Remove-Item $builderDat -Force }
-if (Test-Path $builderZip) {
-    # XP/XOR the ZIP before embedding it.  The payload is still the same
-    # builder, but plain embedded PE files trigger Defender's Wacapew ML
-    # heuristic on the setup executable.
-    $bytes = [IO.File]::ReadAllBytes($builderZip)
-    $key = [Text.Encoding]::ASCII.GetBytes('A5BuilderPayloadKey-2026-10-29')
-    for ($i = 0; $i -lt $bytes.Length; $i++) {
-        $bytes[$i] = $bytes[$i] -bxor $key[$i % $key.Length]
-    }
-    [IO.File]::WriteAllBytes($builderDat, $bytes)
-    $resArgs += "/resource:$builderDat,builder.dat"
-} else {
-    Write-Warning "build/builder.zip not found: the installer will not be self-contained."
+$enginesZip = Join-Path $root 'build/engines.zip'
+if (-not (Test-Path $enginesZip)) {
+    throw "build/engines.zip not found; run tools/build_engines.ps1 first."
 }
+
+$resArgs = @("/resource:$enginesZip,engines.zip")
 $readme = Join-Path $root 'installer/README.txt'
 if (Test-Path $readme) { $resArgs += "/resource:$readme,readme.txt" }
+
+$manifest = Join-Path $root 'installer/app.manifest'
+$manifestArgs = @()
+if (Test-Path $manifest) { $manifestArgs += "/win32manifest:$manifest" }
+
+$icon = Join-Path $root 'installer/asphalt5.ico'
+$iconArgs = @()
+if (Test-Path $icon) { $iconArgs += "/win32icon:$icon" }
 
 & $csc /nologo /target:winexe /platform:anycpu /optimize+ /out:$outPath `
     /r:System.Windows.Forms.dll /r:System.Drawing.dll `
     /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll `
-    $resArgs $csFiles
+    $manifestArgs $iconArgs $resArgs $csFiles
 
 if ($LASTEXITCODE -ne 0) { throw "installer build failed" }
-Write-Host "built $outPath"
+Write-Host ("built {0} ({1:N1} MB)" -f $outPath, ((Get-Item $outPath).Length / 1MB))

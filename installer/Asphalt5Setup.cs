@@ -1,28 +1,19 @@
-// Asphalt 5 - Windows setup (builder edition)
+// Asphalt 5 - Windows setup
 //
-// The installer does NOT ship the game.  It carries:
-//   builder/builder.zip
-//     toolchain/     minimal MinGW-w64 (gcc + headers + libs)
-//     src/           our hand-written runtime sources
-//     armrecomp.exe  ARM -> C translator
+// Installs Asphalt 5 Native using the user's own Android APK (3.2.4, 3.3.7, or
+// 3.4.1).  No APK, libasphalt5.so, game data, MinGW compiler, Python runtime,
+// or obfuscated payload is shipped inside the installer.
 //
 // At install time it:
-//   1. validates the user's own APK,
-//   2. extracts the APK into a temporary folder under %LOCALAPPDATA%,
-//   3. translates libasphalt5.so to C,
-//   4. compiles the generated C with the bundled toolchain,
-//   5. embeds the installer UI/manifest and libasphalt5.so in Asphalt5.exe,
-//      installs it, and creates <install>\gamefiles\GloftA5HD341 (3.4.1),
-//      \GloftA5HD337 (3.3.7) or \GloftA5HD (3.2.4).  The install folder
-//      contains only the exe and gamefiles; no APK resources are left
-//      behind.  The game data is downloaded on first launch (3.4.1/3.3.7)
-//      or supplied by the user (3.2.4).
+//   1. validates the user's APK (SHA-256 of libasphalt5.so),
+//   2. extracts the matching pre-built host engine binary to <install>\Asphalt5.exe,
+//   3. embeds libasphalt5.so (and 3.3.7/3.4.1 installer UI + manifest) from the
+//      user's APK into <install>\Asphalt5.exe,
+//   4. creates <install>\gamefiles\<DataName> and optional shortcuts.
 //
-// Nothing derived from the game is redistributed.
-//
-// Silent mode (tests):
+// Silent mode:
 //   Asphalt5Setup.exe --silent --apk <file.apk> --dir <dir>
-//                     [--shortcut] [--force] [--log <file>] [--keep-build]
+//                     [--shortcut] [--force] [--log <file>]
 
 using System;
 using System.Collections.Generic;
@@ -31,9 +22,10 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading;
 using System.Windows.Forms;
 
 namespace Asphalt5Setup
@@ -45,7 +37,6 @@ namespace Asphalt5Setup
         public string Dir = "";
         public bool Shortcut;
         public bool Force;
-        public bool KeepBuild;
         public string Log = "";
 
         public static Options Parse(string[] args)
@@ -59,7 +50,6 @@ namespace Asphalt5Setup
                     case "--shortcut": o.Shortcut = true; break;
                     case "--no-shortcut": o.Shortcut = false; break;
                     case "--force": o.Force = true; break;
-                    case "--keep-build": o.KeepBuild = true; break;
                     case "--apk": if (++i < args.Length) o.Apk = args[i]; break;
                     case "--dir": if (++i < args.Length) o.Dir = args[i]; break;
                     case "--log": if (++i < args.Length) o.Log = args[i]; break;
@@ -72,7 +62,6 @@ namespace Asphalt5Setup
     internal static class Paths
     {
         public const string GameExe = "Asphalt5.exe";
-        public const string SetupExe = "Asphalt5Setup.exe";
         public const string ExpectedSha =
             "9889bd964a1a8284901ce6a6c9d08cc4f501a1fba12a04048c782aa8051c6d07";
         public const string ExpectedSha337 =
@@ -102,35 +91,22 @@ namespace Asphalt5Setup
             }
         }
 
-        public static string EngineRoot { get { return Path.Combine(DataRoot, "engine"); } }
-
-        public static string BuilderZip
-        {
-            get { return Path.Combine(Path.Combine(BaseDir, "builder"), "builder.zip"); }
-        }
-
-        public static bool HasEmbeddedBuilder
-        {
-            get
-            {
-                Assembly asm = Assembly.GetExecutingAssembly();
-                return asm.GetManifestResourceStream("builder.dat") != null ||
-                       asm.GetManifestResourceStream("builder.zip") != null;
-            }
-        }
-
-        public static bool SamePath(string a, string b)
-        {
-            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b),
-                                 StringComparison.OrdinalIgnoreCase);
-        }
-
         public static string FindApkNearby()
         {
             try
             {
-                string[] hits = Directory.GetFiles(BaseDir, "*.apk");
-                if (hits.Length == 1) return hits[0];
+                string[] dirs = new string[]
+                {
+                    BaseDir,
+                    Path.Combine(BaseDir, "original"),
+                    Path.Combine(BaseDir, "..")
+                };
+                foreach (string d in dirs)
+                {
+                    if (!Directory.Exists(d)) continue;
+                    string[] hits = Directory.GetFiles(d, "*.apk");
+                    if (hits.Length == 1) return Path.GetFullPath(hits[0]);
+                }
             }
             catch { }
             return "";
@@ -142,6 +118,7 @@ namespace Asphalt5Setup
         public bool Is337;
         public bool Is341;
         public string Label = "";
+        public string EngineName = "Asphalt5_324.exe";
         public string SoEntry = "";
         public string ExpectedSha = "";
         public string DataName = "GloftA5HD";
@@ -151,7 +128,6 @@ namespace Asphalt5Setup
         public long DataUncompressed;
 
         public bool UsesInstaller { get { return Is337 || Is341; } }
-        public string ApkSubdir { get { return Is341 ? "apk341" : (Is337 ? "apk337" : "apk"); } }
         public string ManifestName { get { return Is341 ? "GloftA5HD341.manifest" : "GloftA5HD337.manifest"; } }
     }
 
@@ -163,148 +139,111 @@ namespace Asphalt5Setup
         public string DataName = "GloftA5HD";
         public bool Is337;
         public bool Is341;
-        public string LogPath = "";
+    }
+
+    internal static class ShellShortcut
+    {
+        [ComImport]
+        [Guid("00021401-0000-0000-C000-000000000046")]
+        private class CShellLink { }
+
+        [ComImport]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        [Guid("000214F9-0000-0000-C000-000000000046")]
+        private interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, int fFlags);
+            void GetIDList(out IntPtr ppidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxPath);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+            void GetHotkey(out short pwHotkey);
+            void SetHotkey(short wHotkey);
+            void GetShowCmd(out int piShowCmd);
+            void SetShowCmd(int iShowCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, int dwReserved);
+            void Resolve(IntPtr hwnd, int fFlags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+        }
+
+        public static void Create(string linkPath, string targetExe, string workDir, string description)
+        {
+            try
+            {
+                var link = (IShellLinkW)new CShellLink();
+                link.SetPath(targetExe);
+                link.SetWorkingDirectory(workDir);
+                link.SetIconLocation(targetExe, 0);
+                link.SetDescription(description);
+                var file = (IPersistFile)link;
+                Directory.CreateDirectory(Path.GetDirectoryName(linkPath));
+                file.Save(linkPath, false);
+            }
+            catch { /* shortcuts are optional */ }
+        }
     }
 
     internal static class Installer
     {
         public static InstallResult Run(string apk, string dir, bool shortcut, bool force,
-                                        bool keepBuild,
                                         Action<string, int> progress, Action<string> log)
         {
             if (string.IsNullOrWhiteSpace(apk) || !File.Exists(apk))
                 throw new FileNotFoundException("Select the original Asphalt 5 APK first.", apk);
             if (string.IsNullOrWhiteSpace(dir))
                 throw new ArgumentException("Choose an install folder.");
-            if (!File.Exists(Paths.BuilderZip) && !Paths.HasEmbeddedBuilder)
-                throw new FileNotFoundException(
-                    "The installer is missing its builder payload.\n\n" +
-                    "Download the full Asphalt5Setup.exe from the release page.");
 
             dir = Path.GetFullPath(dir);
             log("Install dir: " + dir);
-            progress("Creating install folder...", 1);
-            Directory.CreateDirectory(dir);
 
-            progress("Checking the APK...", 3);
+            progress("Checking the APK...", 10);
             ApkProfile profile = DetectProfile(apk, force, log);
             log("Detected " + profile.Label + " (libasphalt5.so " + profile.ExpectedSha.Substring(0, 12) + "...)");
 
-            string gamefiles = Path.Combine(dir, "gamefiles");
-            string engine = Paths.EngineRoot;
-            string apkDir = Path.Combine(engine, profile.ApkSubdir);
-            try { if (Directory.Exists(engine)) Directory.Delete(engine, true); } catch { }
-            Directory.CreateDirectory(apkDir);
+            Directory.CreateDirectory(dir);
+            string dstExe = Path.Combine(dir, Paths.GameExe);
 
+            progress("Installing game executable...", 35);
+            WriteEngineExe(profile.EngineName, dstExe, log);
+
+            progress("Reading APK resources...", 60);
             using (ZipArchive zip = ZipFile.OpenRead(apk))
             {
-                progress("Extracting the APK...", 5);
-                long done = 0;
-                long total = Math.Max(1, zip.Entries.Count);
-                string root = Path.GetFullPath(apkDir) + Path.DirectorySeparatorChar;
-                foreach (ZipArchiveEntry e in zip.Entries)
-                {
-                    done++;
-                    progress("Extracting " + e.FullName, 5 + (int)(15 * done / total));
-                    if (string.IsNullOrEmpty(e.Name)) continue;
+                if (profile.UsesInstaller)
+                    AppendEmbeddedUi(dstExe, zip, profile, log);
 
-                    string target = Path.GetFullPath(Path.Combine(apkDir, e.FullName));
-                    if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException("Unsafe path in APK: " + e.FullName);
-
-                    Directory.CreateDirectory(Path.GetDirectoryName(target));
-                    e.ExtractToFile(target, true);
-                }
+                ZipArchiveEntry soEntry = zip.GetEntry(profile.SoEntry);
+                if (soEntry == null)
+                    throw new InvalidDataException("APK is missing " + profile.SoEntry);
+                byte[] soBytes = ReadEntryBytes(soEntry);
+                AppendEmbeddedSo(dstExe, soBytes, log);
             }
-
-            string elfPath = Path.Combine(apkDir, profile.SoEntry.Replace('/',
-                                              Path.DirectorySeparatorChar));
-            string build = Path.Combine(dir, "build");
-            if (Directory.Exists(build)) Directory.Delete(build, true);
-            Directory.CreateDirectory(build);
-
-            progress("Unpacking the builder...", 22);
-            ExtractBuilder(build, log);
-
-            string translator = Path.Combine(build, "armrecomp.exe");
-            string toolchain = Path.Combine(build, "toolchain", "bin");
-            string src = Path.Combine(build, "src");
-            string gen = Path.Combine(build, "generated");
-            if (!File.Exists(translator) || !Directory.Exists(toolchain) || !Directory.Exists(src))
-                throw new InvalidDataException("builder.zip is incomplete (translator/toolchain/src).");
-
-            progress("Translating ARM code to C...", 30);
-            log("Translator: " + translator);
-            int rc = Run(translator, "--so \"" + elfPath + "\" --out \"" + gen + "\"", build,
-                         null, log, true, 30, 38, progress, "Translating");
-            string[] functionChunks = Directory.Exists(gen)
-                ? Directory.GetFiles(gen, "functions_*.c") : new string[0];
-            if (rc != 0 || functionChunks.Length == 0)
-                throw new InvalidOperationException("Translation failed (exit code " + rc + ").");
-
-            progress("Applying runtime patches...", 39);
-            int patched = 0, rewritten = 0;
-            foreach (string chunk in functionChunks)
-            {
-                int changed;
-                patched += PatchGenerated(chunk, profile, out changed);
-                rewritten += changed;
-            }
-            if (patched != 13)
-                throw new InvalidOperationException(
-                    "Runtime patch targets missing (" + patched + "/13).");
-            log("Applied CMatrix/quaternion/camera/nitro/rotation/exit/input/display patches (" + patched + "/13, " +
-                rewritten + " rewritten)");
-
-            progress("Compiling the game (this can take 10-20 minutes)...", 40);
-            string gcc = Path.Combine(toolchain, "gcc.exe");
-            string outExe = Path.Combine(build, Paths.GameExe);
-            string args = BuildArgs(src, gen, outExe, profile);
-            log("gcc " + args);
-            rc = Run(gcc, args, build, toolchain, log, true, 40, 92, progress, "Compiling");
-            if (rc != 0 || !File.Exists(outExe))
-                throw new InvalidOperationException(
-                    "Compilation failed (exit code " + rc + ").\n\nSee install.log for details.");
-
-            progress("Embedding the installer UI and game library...", 94);
-            if (profile.UsesInstaller)
-                AppendEmbeddedUi(outExe, apkDir, profile, log);
-            AppendEmbeddedSo(outExe, elfPath, log);
-
-            progress("Installing the game...", 95);
-            string dstExe = Path.Combine(dir, Paths.GameExe);
-            File.Copy(outExe, dstExe, true);
             log("Installed " + dstExe);
 
-            progress("Cleaning up temporary files...", 96);
-            TryDelete(Paths.EngineRoot);
-            log("Removed the extracted APK (library and installer UI are embedded)");
-
-            progress("Preparing the game data folder...", 97);
+            progress("Preparing gamefiles folder...", 85);
+            string gamefiles = Path.Combine(dir, "gamefiles");
             string dataDir = Path.Combine(gamefiles, profile.DataName);
             Directory.CreateDirectory(dataDir);
             if (profile.UsesInstaller)
-            {
-                log("The game will download its data on first launch.");
-            }
+                log("The game will download its data on first launch (or place files in " + dataDir + ").");
             else
-            {
                 log("Place your GloftA5HD files in " + dataDir);
-            }
 
             if (shortcut)
             {
-                progress("Creating shortcuts...", 99);
-                CreateShortcut(Path.Combine(Environment.GetFolderPath(
-                    Environment.SpecialFolder.DesktopDirectory), "Asphalt 5.lnk"), dstExe, dir);
-                CreateShortcut(Path.Combine(Environment.GetFolderPath(
-                    Environment.SpecialFolder.Programs), "Asphalt 5.lnk"), dstExe, dir);
-            }
-
-            if (!keepBuild)
-            {
-                try { Directory.Delete(build, true); }
-                catch (Exception ex) { log("Could not remove build folder: " + ex.Message); }
+                progress("Creating shortcuts...", 95);
+                ShellShortcut.Create(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Asphalt 5.lnk"),
+                    dstExe, dir, "Asphalt 5");
+                ShellShortcut.Create(
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Asphalt 5.lnk"),
+                    dstExe, dir, "Asphalt 5");
             }
 
             progress("Done", 100);
@@ -318,61 +257,40 @@ namespace Asphalt5Setup
             return r;
         }
 
-        private static void ExtractBuilder(string build, Action<string> log)
+        private static void WriteEngineExe(string engineName, string outPath, Action<string> log)
         {
-            string external = Paths.BuilderZip;
+            string external = Path.Combine(Paths.BaseDir, "engines", engineName);
             if (File.Exists(external))
             {
-                log("Using external builder: " + external);
-                ZipFile.ExtractToDirectory(external, build);
+                log("Using external engine: " + external);
+                File.Copy(external, outPath, true);
                 return;
             }
 
-            Assembly asm = Assembly.GetExecutingAssembly();
-            Stream res = asm.GetManifestResourceStream("builder.dat");
-            string resourceName = "builder.dat";
+            Stream res = Assembly.GetExecutingAssembly().GetManifestResourceStream("engines.zip");
             if (res == null)
-            {
-                res = asm.GetManifestResourceStream("builder.zip");
-                resourceName = "builder.zip";
-            }
-            if (res == null)
-                throw new FileNotFoundException("Embedded builder payload not found.");
+                throw new FileNotFoundException("Missing engine runtime payload (" + engineName + ").");
 
-            byte[] data;
             using (res)
-            using (var ms = new MemoryStream())
+            using (var zip = new ZipArchive(res, ZipArchiveMode.Read))
             {
-                res.CopyTo(ms);
-                data = ms.ToArray();
-            }
-            if (resourceName == "builder.dat")
-            {
-                byte[] key = Encoding.ASCII.GetBytes("A5BuilderPayloadKey-2026-10-29");
-                for (int i = 0; i < data.Length; i++)
-                    data[i] ^= key[i % key.Length];
-            }
-
-            log("Extracting embedded builder");
-            string root = Path.GetFullPath(build) + Path.DirectorySeparatorChar;
-            using (var zip = new ZipArchive(new MemoryStream(data), ZipArchiveMode.Read))
-            {
-                foreach (ZipArchiveEntry e in zip.Entries)
-                {
-                    if (string.IsNullOrEmpty(e.Name)) continue;
-                    string target = Path.GetFullPath(Path.Combine(build, e.FullName));
-                    if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException("Unsafe path in builder: " + e.FullName);
-                    Directory.CreateDirectory(Path.GetDirectoryName(target));
-                    e.ExtractToFile(target, true);
-                }
+                ZipArchiveEntry e = zip.GetEntry(engineName);
+                if (e == null)
+                    throw new NotSupportedException(
+                        "This setup package does not include the engine for " + engineName + ".");
+                log("Extracting " + engineName);
+                e.ExtractToFile(outPath, true);
             }
         }
 
-        private static void TryDelete(string path)
+        private static byte[] ReadEntryBytes(ZipArchiveEntry e)
         {
-            try { if (Directory.Exists(path)) Directory.Delete(path, true); else if (File.Exists(path)) File.Delete(path); }
-            catch { }
+            using (Stream s = e.Open())
+            using (var ms = new MemoryStream())
+            {
+                s.CopyTo(ms);
+                return ms.ToArray();
+            }
         }
 
         private static ApkProfile Profile337(string label)
@@ -381,6 +299,7 @@ namespace Asphalt5Setup
             {
                 Is337 = true,
                 Label = label,
+                EngineName = "Asphalt5_337.exe",
                 SoEntry = "lib/armeabi/libasphalt5.so",
                 ExpectedSha = Paths.ExpectedSha337,
                 DataName = "GloftA5HD337",
@@ -397,6 +316,7 @@ namespace Asphalt5Setup
             {
                 Is341 = true,
                 Label = label,
+                EngineName = "Asphalt5_341.exe",
                 SoEntry = "lib/armeabi/libasphalt5.so",
                 ExpectedSha = Paths.ExpectedSha341,
                 DataName = "GloftA5HD341",
@@ -412,10 +332,21 @@ namespace Asphalt5Setup
             return new ApkProfile
             {
                 Label = label,
+                EngineName = "Asphalt5_324.exe",
                 SoEntry = "lib/armeabi-v7a/libasphalt5.so",
                 ExpectedSha = Paths.ExpectedSha,
                 DataName = "GloftA5HD"
             };
+        }
+
+        public static ApkProfile TryDetectProfileQuiet(string apk)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(apk) || !File.Exists(apk)) return null;
+                return DetectProfile(apk, false, delegate(string s) { });
+            }
+            catch { return null; }
         }
 
         private static ApkProfile DetectProfile(string apk, bool force, Action<string> log)
@@ -441,11 +372,11 @@ namespace Asphalt5Setup
             }
 
             if (hasHd && string.Equals(shaHd, Paths.ExpectedSha341, StringComparison.OrdinalIgnoreCase))
-                return Profile341("Asphalt 5 HD 3.4.1");
+                return Profile341("Asphalt 5 HD 3.4.1 (Android Market)");
             if (hasHd && string.Equals(shaHd, Paths.ExpectedSha337, StringComparison.OrdinalIgnoreCase))
-                return Profile337("Asphalt 5 HD 3.3.7");
+                return Profile337("Asphalt 5 HD 3.3.7 (Galaxy Tab)");
             if (has324 && string.Equals(sha324, Paths.ExpectedSha, StringComparison.OrdinalIgnoreCase))
-                return Profile324("Asphalt 5 HD 3.2.4");
+                return Profile324("Asphalt 5 HD 3.2.4 (Sony Ericsson)");
 
             if (!force)
                 throw new InvalidDataException(
@@ -480,11 +411,7 @@ namespace Asphalt5Setup
             return sb.ToString();
         }
 
-        /* Append the six installer UI files from the user's APK and the data
-         * manifest to the built exe.  The runtime extracts this small archive
-         * to %LOCALAPPDATA% for the first-run installer and removes it again,
-         * so the install folder stays exe + gamefiles only. */
-        private static void AppendEmbeddedUi(string exePath, string apkDir, ApkProfile profile,
+        private static void AppendEmbeddedUi(string exePath, ZipArchive apkZip, ApkProfile profile,
                                              Action<string> log)
         {
             string[] assets = new string[]
@@ -496,15 +423,14 @@ namespace Asphalt5Setup
                 "gameloft_logo_01.png",
                 "installer_000.ogg"
             };
-            string raw = Path.Combine(apkDir, "res", "raw");
             var entries = new List<KeyValuePair<string, byte[]>>();
             long total = 0;
             foreach (string name in assets)
             {
-                string path = Path.Combine(raw, name);
-                if (!File.Exists(path))
+                ZipArchiveEntry e = apkZip.GetEntry("res/raw/" + name);
+                if (e == null)
                     throw new InvalidDataException("APK is missing res/raw/" + name);
-                byte[] data = File.ReadAllBytes(path);
+                byte[] data = ReadEntryBytes(e);
                 entries.Add(new KeyValuePair<string, byte[]>(name, data));
                 total += data.Length;
             }
@@ -538,9 +464,8 @@ namespace Asphalt5Setup
             log("Embedded installer UI and manifest (" + total + " bytes)");
         }
 
-        private static void AppendEmbeddedSo(string exePath, string soPath, Action<string> log)
+        private static void AppendEmbeddedSo(string exePath, byte[] data, Action<string> log)
         {
-            byte[] data = File.ReadAllBytes(soPath);
             using (FileStream fs = new FileStream(exePath, FileMode.Append, FileAccess.Write))
             {
                 fs.Write(data, 0, data.Length);
@@ -548,284 +473,6 @@ namespace Asphalt5Setup
                 fs.Write(BitConverter.GetBytes((long)data.Length), 0, 8);
             }
             log("Appended libasphalt5.so (" + data.Length + " bytes) to the executable");
-        }
-
-        private static string BuildArgs(string src, string gen, string outExe, ApkProfile profile)
-        {
-            var sb = new StringBuilder();
-            sb.Append("-O1 -fno-strict-aliasing -fwrapv -fno-use-linker-plugin ");
-            sb.Append("-DNDEBUG -DRECOMP_GUI -D_CRT_SECURE_NO_WARNINGS ");
-            if (profile.Is337) sb.Append("-DRECOMP_TARGET_337 ");
-            if (profile.Is341) sb.Append("-DRECOMP_TARGET_341 ");
-            sb.Append("-I\"").Append(src).Append("\" ");
-            sb.Append("-I\"").Append(Path.Combine(src, "core")).Append("\" ");
-            sb.Append("-I\"").Append(Path.Combine(src, "gl")).Append("\" ");
-            sb.Append("-I\"").Append(gen).Append("\" ");
-
-            foreach (string f in Directory.GetFiles(src, "*.c"))
-                sb.Append('"').Append(f).Append("\" ");
-            foreach (string d in new string[] { "core", "platform", "gl" })
-                foreach (string f in Directory.GetFiles(Path.Combine(src, d), "*.c"))
-                    sb.Append('"').Append(f).Append("\" ");
-            if (profile.UsesInstaller)
-            {
-                string miniz = Path.Combine(src, "third_party", "miniz");
-                foreach (string f in Directory.GetFiles(miniz, "*.c"))
-                    sb.Append('"').Append(f).Append("\" ");
-            }
-            foreach (string f in Directory.GetFiles(gen, "*.c"))
-                sb.Append('"').Append(f).Append("\" ");
-
-            sb.Append("-o \"").Append(outExe).Append("\" ");
-            sb.Append("-lopengl32 -lgdi32 -luser32 -lwinmm -lws2_32 -lm " +
-                      " -ldinput8 -ldxguid -lmfreadwrite -lmfplat -lmfuuid -lole32 -luuid ");
-            if (profile.UsesInstaller) sb.Append("-lwininet -lbcrypt -lcomctl32 -lcomdlg32 ");
-            sb.Append("-static ");
-            sb.Append("-mwindows");
-            return sb.ToString();
-        }
-
-        /* Returns how many of the thirteen patch targets occur in this chunk;
-         * changed receives how many were actually rewritten.  The patch
-         * targets can land in different functions_NN.c files. */
-        private static int PatchGenerated(string path, ApkProfile profile, out int changed)
-        {
-            // The translator writes CRLF on Windows; normalise so the prologue
-            // match is line-ending independent.
-            string s = File.ReadAllText(path).Replace("\r\n", "\n").Replace("\r", "\n");
-            int found = 0;
-            changed = 0;
-            string[] cm;
-            string nitro, rotation, exit, labelFn, clickFn, actionFn, modeFn, videoFn;
-            int c;
-            if (profile.Is341)
-            {
-                cm = new string[] { "fn_0013e1ac", "fn_0013e224", "fn_0013e29c", "fn_0013ec24" };
-                c = PatchCameraHD(ref s, "fn_0013cb18", "fn_0013c9b0");
-                nitro = "fn_0015688c";
-                rotation = "fn_0009a118";
-                exit = "fn_00063bf4";
-                labelFn = "fn_000eecc8";
-                clickFn = "fn_000ee734";
-                actionFn = "fn_000ee5fc";
-                modeFn = "fn_00060a50";
-                videoFn = "fn_00114428";
-            }
-            else if (profile.Is337)
-            {
-                cm = new string[] { "fn_0013ef5c", "fn_0013efd4", "fn_0013f04c", "fn_0013f9d4" };
-                c = PatchCameraHD(ref s, "fn_0013d8c8", "fn_0013d760");
-                nitro = "fn_0015704c";
-                rotation = "fn_000bde00";
-                exit = "fn_00082b08";
-                labelFn = "fn_000ef450";
-                clickFn = "fn_000eeebc";
-                actionFn = "fn_000eed80";
-                modeFn = "fn_0007f988";
-                videoFn = "fn_00115268";
-            }
-            else
-            {
-                cm = new string[] { "fn_00153478", "fn_001534f0", "fn_00153568", "fn_00154e38" };
-                c = PatchCamera(ref s);
-                nitro = "fn_0016e384";
-                rotation = "fn_000d15b8";
-                exit = "fn_00097a04";
-                labelFn = "fn_00104524";
-                clickFn = "fn_00103698";
-                actionFn = "fn_0010359c";
-                modeFn = "fn_00093fd0";
-                videoFn = "fn_001287c8";
-            }
-            string[] cmWhy = new string[]
-            {
-                "CMatrix::Mult scalar replacement.",
-                "CMatrix::PreMult scalar replacement.",
-                "CMatrix::SetMult scalar replacement.",
-                "CMatrix::GetQuaternion robust extraction."
-            };
-            for (int i = 0; i < cm.Length; i++)
-            {
-                string call = i == 3
-                    ? "guest_cmatrix_get_quaternion(cpu); return;"
-                    : "guest_cmatrix_mul(cpu, " + i + "); return;";
-                int r = PatchOne(ref s, cm[i], call, cmWhy[i]);
-                if (r > 0) { found++; if (r == 1) changed++; }
-            }
-            if (c > 0) { found++; if (c == 1) changed++; }
-            int rn = PatchOne(ref s, nitro,
-                              "if (platform_nitro_held_for_car(cpu->r[0])) cpu->r[1] |= 0x20u;",
-                              "Host nitro tap latch.", "platform_nitro_held_for_car");
-            if (rn > 0) { found++; if (rn == 1) changed++; }
-            int rr = PatchOne(ref s, rotation,
-                              "if (platform_buttons_mode()) return;",
-                              "No phone-rotation steering in buttons mode.",
-                              "platform_buttons_mode");
-            if (rr > 0) { found++; if (rr == 1) changed++; }
-            int re = PatchOne(ref s, exit,
-                              "platform_request_exit(); return;",
-                              "Host exit for the in-game Exit item.",
-                              "platform_request_exit");
-            if (re > 0) { found++; if (re == 1) changed++; }
-            int rl = PatchOne(ref s, labelFn,
-                              "if (guest_control_menu_label(cpu)) return;",
-                              "Input mapper Controls row label.",
-                              "guest_control_menu_label");
-            if (rl > 0) { found++; if (rl == 1) changed++; }
-            int rb = PatchOne(ref s, clickFn,
-                              "if (guest_control_menu_click(cpu)) return;",
-                              "Input mapper Controls row click.",
-                              "guest_control_menu_click");
-            if (rb > 0) { found++; if (rb == 1) changed++; }
-            int ra = PatchOne(ref s, actionFn,
-                              "if (guest_control_menu_action(cpu)) return;",
-                              "Input mapper Controls row action guard.",
-                              "guest_control_menu_action");
-            if (ra > 0) { found++; if (ra == 1) changed++; }
-            int rm = PatchOne(ref s, modeFn,
-                              "guest_force_control_mode(cpu);",
-                              "Force accelerometer control scheme.",
-                              "guest_force_control_mode");
-            if (rm > 0) { found++; if (rm == 1) changed++; }
-            int rv = PatchOne(ref s, videoFn,
-                              "if (guest_video_menu_label(cpu)) return;",
-                              "Display settings entry in the Video menu.",
-                              "guest_video_menu_label");
-            if (rv > 0) { found++; if (rv == 1) changed++; }
-            if (changed > 0) File.WriteAllText(path, s);
-            return found;
-        }
-
-        /* 3.3.7 / 3.4.1 CCamera::update: note the camera as soon as it is
-         * passed in, then run the host filter after the engine's matrix build. */
-        private static int PatchCameraHD(ref string src, string fn, string tailFn)
-        {
-            string marker = "void " + fn + "(CPU *cpu)";
-            int at = src.IndexOf(marker, StringComparison.Ordinal);
-            if (at < 0) return 0;
-            if (src.IndexOf("camera_filter_last", at,
-                            Math.Min(5000, src.Length - at),
-                            StringComparison.Ordinal) >= 0)
-                return 2;
-
-            string decl = "extern void camera_note_cam(uint32_t cam);\n" +
-                          "extern void camera_filter_last(void);\n";
-            src = src.Insert(at, decl);
-            at = src.IndexOf(marker, at + decl.Length, StringComparison.Ordinal);
-            if (at < 0) throw new InvalidDataException("CCamera::update marker shifted");
-
-            string prologue =
-                marker + "\n{\n" +
-                "    const uint32_t entry_lr = cpu->r[14];\n" +
-                "    uint32_t shc = 0; (void)shc; (void)entry_lr;\n";
-            int pp = src.IndexOf(prologue, at, StringComparison.Ordinal);
-            if (pp < 0) throw new InvalidDataException("CCamera::update prologue not found");
-            src = src.Insert(pp + prologue.Length, "    camera_note_cam(cpu->r[0]);\n");
-
-            string tail = "        return " + tailFn + "(cpu);\n";
-            int tp = src.IndexOf(tail, at, StringComparison.Ordinal);
-            if (tp < 0) throw new InvalidDataException("CCamera::update build tail not found");
-            src = src.Remove(tp, tail.Length).Insert(tp,
-                "        " + tailFn + "(cpu);\n" +
-                "        camera_filter_last();\n" +
-                "        return;\n");
-            return 1;
-        }
-
-        /* Hook CCamera::update into the host view-matrix filter.  The camera
-         * target only changes on 40 ms ticks; the host filter spreads that
-         * correction over real time for smooth steering at high FPS. */
-        private static int PatchCamera(ref string src)
-        {
-            string marker = "void fn_00151c40(CPU *cpu)";
-            int at = src.IndexOf(marker, StringComparison.Ordinal);
-            if (at < 0) return 0;
-            if (src.IndexOf("camera_filter_last", at,
-                            Math.Min(5000, src.Length - at),
-                            StringComparison.Ordinal) >= 0)
-                return 2;
-
-            string decl = "extern void camera_note_cam(uint32_t cam);\n" +
-                          "extern void camera_filter_last(void);\n";
-            src = src.Insert(at, decl);
-            at = src.IndexOf(marker, at + decl.Length, StringComparison.Ordinal);
-            if (at < 0) throw new InvalidDataException("CCamera::update marker shifted");
-
-            string hook = "L_00151c7c:;\n";
-            int hp = src.IndexOf(hook, at, StringComparison.Ordinal);
-            if (hp < 0) throw new InvalidDataException("CCamera::update hook label not found");
-            src = src.Insert(hp + hook.Length, "    camera_note_cam(cpu->r[4]);\n");
-
-            at = src.IndexOf(marker, StringComparison.Ordinal);
-            string tail = "        return fn_00151be0(cpu);\n";
-            int tp = src.IndexOf(tail, at, StringComparison.Ordinal);
-            if (tp < 0) throw new InvalidDataException("CCamera::update build tail not found");
-            src = src.Remove(tp, tail.Length).Insert(tp,
-                "        fn_00151be0(cpu);\n" +
-                "        camera_filter_last();\n" +
-                "        return;\n");
-            return 1;
-        }
-
-        /* 0 = target not in this chunk, 1 = rewritten, 2 = already patched. */
-        private static int PatchOne(ref string src, string fn, string call, string why,
-                                    string sentinel = "guest_cmatrix")
-        {
-            string marker = "void " + fn + "(CPU *cpu)";
-            int at = src.IndexOf(marker, StringComparison.Ordinal);
-            if (at < 0) return 0;
-            if (sentinel != null &&
-                src.IndexOf(sentinel, at, Math.Min(400, src.Length - at),
-                            StringComparison.Ordinal) >= 0)
-                return 2;
-            string prologue =
-                marker + "\n{\n" +
-                "    const uint32_t entry_lr = cpu->r[14];\n" +
-                "    uint32_t shc = 0; (void)shc; (void)entry_lr;\n";
-            if (src.IndexOf(prologue, at, StringComparison.Ordinal) < 0)
-                throw new InvalidDataException("Generated prologue not found for " + fn);
-            src = src.Replace(prologue,
-                              prologue + "    /* " + why + " */\n    " + call + "\n");
-            return 1;
-        }
-
-        private static int Run(string exe, string args, string workDir, string toolchainBin,
-                               Action<string> log, bool pumpUi,
-                               int pct0, int pct1, Action<string, int> progress, string phase)
-        {
-            var psi = new ProcessStartInfo(exe, args);
-            psi.WorkingDirectory = workDir;
-            psi.UseShellExecute = false;
-            psi.CreateNoWindow = true;
-            psi.RedirectStandardOutput = true;
-            psi.RedirectStandardError = true;
-            string path = Environment.GetEnvironmentVariable("PATH") ?? "";
-            if (toolchainBin != null) path = toolchainBin + ";" + path;
-            psi.EnvironmentVariables["PATH"] = path;
-
-            using (var p = new Process())
-            {
-                p.StartInfo = psi;
-                p.OutputDataReceived += delegate(object s, DataReceivedEventArgs e)
-                { if (e.Data != null) log(e.Data); };
-                p.ErrorDataReceived += delegate(object s, DataReceivedEventArgs e)
-                { if (e.Data != null) log(e.Data); };
-                p.Start();
-                p.BeginOutputReadLine();
-                p.BeginErrorReadLine();
-
-                DateTime start = DateTime.UtcNow;
-                while (!p.WaitForExit(200))
-                {
-                    if (pumpUi) Application.DoEvents();
-                    int elapsed = (int)(DateTime.UtcNow - start).TotalSeconds;
-                    int span = Math.Max(1, pct1 - pct0);
-                    int pct = pct0 + Math.Min(span - 1, elapsed / 9); // slow crawl; compile dominates
-                    progress(phase + "... " + (elapsed / 60) + "m " + (elapsed % 60) + "s", pct);
-                }
-                p.WaitForExit();
-                return p.ExitCode;
-            }
         }
 
         public static string Hash(Stream s)
@@ -837,24 +484,6 @@ namespace Asphalt5Setup
                 foreach (byte b in h) sb.Append(b.ToString("x2"));
                 return sb.ToString();
             }
-        }
-
-        private static void CreateShortcut(string path, string exe, string workDir)
-        {
-            try
-            {
-                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                object shell = Activator.CreateInstance(shellType);
-                object link = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod,
-                                                     null, shell, new object[] { path });
-                Type lt = link.GetType();
-                lt.InvokeMember("TargetPath", BindingFlags.SetProperty, null, link, new object[] { exe });
-                lt.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, link, new object[] { workDir });
-                lt.InvokeMember("IconLocation", BindingFlags.SetProperty, null, link, new object[] { exe + ",0" });
-                lt.InvokeMember("Description", BindingFlags.SetProperty, null, link, new object[] { "Asphalt 5" });
-                lt.InvokeMember("Save", BindingFlags.InvokeMethod, null, link, null);
-            }
-            catch { /* shortcuts are optional */ }
         }
 
         public static void OpenFolder(string path)
@@ -874,6 +503,7 @@ namespace Asphalt5Setup
     internal sealed class SetupForm : Form
     {
         private readonly TextBox _apk = new TextBox();
+        private readonly Label _apkInfo = new Label();
         private readonly TextBox _dir = new TextBox();
         private readonly CheckBox _shortcut = new CheckBox();
         private readonly Button _install = new Button();
@@ -888,11 +518,12 @@ namespace Asphalt5Setup
         public SetupForm(Options opts)
         {
             Text = "Asphalt 5 - Setup";
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
-            MinimizeBox = false;
+            MinimizeBox = true;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(680, 500);
+            ClientSize = new Size(680, 536);
             AutoScaleMode = AutoScaleMode.None;
             Font = new Font("Segoe UI", 9f);
             BackColor = Color.FromArgb(245, 247, 250);
@@ -905,23 +536,24 @@ namespace Asphalt5Setup
             Controls.Add(title);
 
             var intro = new Label();
-            intro.Text = "This setup builds the game from your own Asphalt 5 APK.\n" +
-                         "You must own the game. Build time: usually 3-20 minutes.";
+            intro.Text = "Installs Asphalt 5 using your own Android APK (3.2.4, 3.3.7, or 3.4.1).\n" +
+                         "You must own the game. No APK or game data is redistributed.";
             intro.ForeColor = Color.FromArgb(70, 80, 95);
             intro.SetBounds(26, 56, 630, 38);
             Controls.Add(intro);
 
             var g1 = new GroupBox();
             g1.Text = "1. Original APK";
-            g1.SetBounds(24, 104, 632, 76);
+            g1.SetBounds(24, 102, 632, 92);
             Controls.Add(g1);
 
-            _apk.SetBounds(16, 30, 500, 26);
+            _apk.SetBounds(16, 26, 500, 26);
             _apk.Text = opts.Apk;
+            _apk.TextChanged += delegate { OnApkChanged(); };
             g1.Controls.Add(_apk);
             var browseApk = new Button();
             browseApk.Text = "Browse...";
-            browseApk.SetBounds(524, 29, 92, 28);
+            browseApk.SetBounds(524, 25, 92, 28);
             browseApk.Click += delegate
             {
                 using (var d = new OpenFileDialog())
@@ -934,9 +566,14 @@ namespace Asphalt5Setup
             };
             g1.Controls.Add(browseApk);
 
+            _apkInfo.Text = "Drop your Asphalt 5 APK here or click Browse.";
+            _apkInfo.ForeColor = Color.FromArgb(90, 100, 115);
+            _apkInfo.SetBounds(16, 60, 600, 20);
+            g1.Controls.Add(_apkInfo);
+
             var g2 = new GroupBox();
             g2.Text = "2. Install location";
-            g2.SetBounds(24, 190, 632, 76);
+            g2.SetBounds(24, 204, 632, 76);
             Controls.Add(g2);
 
             _dir.SetBounds(16, 30, 500, 26);
@@ -957,50 +594,51 @@ namespace Asphalt5Setup
             g2.Controls.Add(browseDir);
 
             _shortcut.Text = "Create Desktop and Start Menu shortcuts";
-            _shortcut.SetBounds(28, 278, 400, 24);
+            _shortcut.SetBounds(28, 294, 400, 24);
             _shortcut.Checked = true;
             Controls.Add(_shortcut);
 
             _install.Text = "Install";
-            _install.SetBounds(520, 272, 136, 34);
+            _install.SetBounds(520, 288, 136, 34);
             _install.Click += delegate { DoInstall(); };
             Controls.Add(_install);
 
-            _bar.SetBounds(24, 322, 632, 18);
+            _bar.SetBounds(24, 338, 632, 18);
             _bar.Minimum = 0; _bar.Maximum = 100;
             Controls.Add(_bar);
 
             _status.Text = "Ready.";
             _status.ForeColor = Color.FromArgb(70, 80, 95);
-            _status.SetBounds(26, 344, 630, 20);
+            _status.SetBounds(26, 360, 630, 22);
             Controls.Add(_status);
 
             var g3 = new GroupBox();
             g3.Text = "3. Finish";
-            g3.SetBounds(24, 370, 632, 112);
+            g3.SetBounds(24, 388, 632, 128);
             Controls.Add(g3);
 
-            _hint.Text = "3.4.1 and 3.3.7 download the official pack on first launch.\n" +
-                         "3.2.4: copy your GloftA5HD folder into gamefiles\\GloftA5HD.";
+            _hint.Text = "3.2.4: copy your GloftA5HD folder into gamefiles\\GloftA5HD.\n" +
+                         "3.3.7 / 3.4.1: click Play to download data on first launch (or add data manually).";
             _hint.ForeColor = Color.FromArgb(70, 80, 95);
-            _hint.SetBounds(16, 20, 600, 34);
+            _hint.AutoEllipsis = true;
+            _hint.SetBounds(16, 22, 600, 44);
             g3.Controls.Add(_hint);
 
             _open.Text = "Open gamefiles";
-            _open.SetBounds(16, 64, 130, 28);
+            _open.SetBounds(16, 80, 130, 28);
             _open.Enabled = false;
             _open.Click += delegate { if (_result != null) Installer.OpenFolder(_result.GameFiles); };
             g3.Controls.Add(_open);
 
             _play.Text = "Play";
-            _play.SetBounds(154, 64, 100, 28);
+            _play.SetBounds(154, 80, 100, 28);
             _play.Enabled = false;
             _play.Click += delegate { if (_result != null) Installer.Play(_result); };
             g3.Controls.Add(_play);
 
             var close = new Button();
             close.Text = "Close";
-            close.SetBounds(536, 64, 80, 28);
+            close.SetBounds(536, 80, 80, 28);
             close.Click += delegate { Close(); };
             g3.Controls.Add(close);
 
@@ -1015,20 +653,35 @@ namespace Asphalt5Setup
                 if (files != null && files.Length > 0) _apk.Text = files[0];
             };
 
-            FormClosing += delegate(object sender, FormClosingEventArgs e)
-            {
-                if (!_install.Enabled)
-                {
-                    e.Cancel = true;
-                    MessageBox.Show(this,
-                        "The installer is still building the game.\n" +
-                        "Please wait for it to finish.",
-                        "Asphalt 5 setup", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
-            };
-
             AcceptButton = _install;
             if (_apk.Text.Length == 0) _apk.Text = Paths.FindApkNearby();
+            OnApkChanged();
+        }
+
+        private void OnApkChanged()
+        {
+            string p = _apk.Text.Trim();
+            if (p.Length == 0)
+            {
+                _apkInfo.Text = "Drop your Asphalt 5 APK here or click Browse.";
+                _apkInfo.ForeColor = Color.FromArgb(90, 100, 115);
+                return;
+            }
+            if (!File.Exists(p))
+            {
+                _apkInfo.Text = "APK file not found.";
+                _apkInfo.ForeColor = Color.FromArgb(165, 50, 40);
+                return;
+            }
+            ApkProfile prof = Installer.TryDetectProfileQuiet(p);
+            if (prof == null)
+            {
+                _apkInfo.Text = "Unrecognized APK (supported: 3.2.4 SE, 3.3.7 Galaxy Tab, 3.4.1 Market).";
+                _apkInfo.ForeColor = Color.FromArgb(170, 95, 20);
+                return;
+            }
+            _apkInfo.Text = "Detected: " + prof.Label;
+            _apkInfo.ForeColor = Color.FromArgb(20, 120, 60);
         }
 
         private void DoInstall()
@@ -1052,48 +705,48 @@ namespace Asphalt5Setup
                 Action<string, int> progress = delegate(string msg, int pct)
                 {
                     _status.Text = msg;
-                    _bar.Style = (pct >= 40 && pct < 95) ? ProgressBarStyle.Marquee : ProgressBarStyle.Blocks;
                     _bar.Value = Math.Max(0, Math.Min(100, pct));
                     Application.DoEvents();
                 };
+
                 try
                 {
                     _result = Installer.Run(_apk.Text.Trim(), _dir.Text.Trim(), _shortcut.Checked,
-                                            false, false,
-                                            progress, logLine);
+                                            false, progress, logLine);
                 }
                 catch (InvalidDataException ex)
                 {
-                    if (MessageBox.Show(this, ex.Message + "\n\nBuild anyway?",
+                    if (ex.Message.IndexOf("Unsupported", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        ex.Message.IndexOf("not a supported", StringComparison.OrdinalIgnoreCase) < 0)
+                        throw;
+                    if (MessageBox.Show(this, ex.Message + "\n\nInstall anyway?",
                             "Unsupported APK", MessageBoxButtons.YesNo,
                             MessageBoxIcon.Warning) != DialogResult.Yes)
                         throw;
                     _result = Installer.Run(_apk.Text.Trim(), _dir.Text.Trim(), _shortcut.Checked,
-                                            true, false,
-                                            progress, logLine);
+                                            true, progress, logLine);
                 }
-                _bar.Style = ProgressBarStyle.Blocks;
+
                 _bar.Value = 100;
                 _status.Text = "Installed. " + ((_result.Is337 || _result.Is341)
-                    ? "The game downloads its data on first launch."
-                    : "Copy your GloftA5HD folder into the gamefiles folder.");
+                    ? "Click Play to launch and download data (or add data manually)."
+                    : "Copy your GloftA5HD folder into gamefiles\\GloftA5HD.");
                 _play.Enabled = true;
                 _open.Enabled = true;
                 _hint.Text = (_result.Is337 || _result.Is341)
-                    ? "Game data is downloaded by the game on first launch."
-                    : "Game data folder:\n" + Path.Combine(_result.GameFiles, _result.DataName);
-                if (MessageBox.Show(this,
+                    ? "Ready to play (downloads on first launch, or copy data manually to):\n" + Path.Combine(_result.GameFiles, _result.DataName)
+                    : "Copy your GloftA5HD folder into:\n" + Path.Combine(_result.GameFiles, _result.DataName);
+                if (!_result.Is337 && !_result.Is341)
+                {
+                    MessageBox.Show(this,
                         "Installation complete.\n\n" +
-                        ((_result.Is337 || _result.Is341)
-                            ? "The game will download its official data pack on first launch."
-                            : "Copy your GloftA5HD folder into:\n" + Path.Combine(_result.GameFiles, _result.DataName)) +
-                        "\n\nOpen the install folder now?", "Asphalt 5",
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
-                    Installer.OpenFolder(_result.GameFiles);
+                        "Copy your GloftA5HD folder into:\n" +
+                        Path.Combine(_result.GameFiles, _result.DataName),
+                        "Asphalt 5", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
             }
             catch (Exception ex)
             {
-                _bar.Style = ProgressBarStyle.Blocks;
                 _bar.Value = 0;
                 _status.Text = "Installation failed. See install.log.";
                 MessageBox.Show(this, ex.Message + "\n\nLog: " + _logPath, "Asphalt 5 setup",
@@ -1127,7 +780,11 @@ namespace Asphalt5Setup
             try
             {
                 if (o.Log.Length > 0)
+                {
+                    string logDir = Path.GetDirectoryName(Path.GetFullPath(o.Log));
+                    if (!string.IsNullOrEmpty(logDir)) Directory.CreateDirectory(logDir);
                     log = new StreamWriter(o.Log, false, Encoding.UTF8);
+                }
                 Action<string> logLine = delegate(string s)
                 {
                     if (log != null) { log.WriteLine(DateTime.Now.ToString("HH:mm:ss") + "  " + s); log.Flush(); }
@@ -1137,8 +794,7 @@ namespace Asphalt5Setup
                     logLine(string.Format("[{0,3}%] {1}", pct, msg));
                 };
                 logLine("Silent install");
-                InstallResult r = Installer.Run(o.Apk, o.Dir, o.Shortcut, o.Force, o.KeepBuild,
-                                                progress, logLine);
+                InstallResult r = Installer.Run(o.Apk, o.Dir, o.Shortcut, o.Force, progress, logLine);
                 logLine("OK " + r.GameExe);
                 return 0;
             }

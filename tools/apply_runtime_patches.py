@@ -36,6 +36,13 @@ VERSIONS = {
         "nitro": "fn_0016e384",
         "rotation": "fn_000d15b8",
         "exit": "fn_00097a04",
+        "hooks": [
+            ("fn_00104524", "if (guest_control_menu_label(cpu)) return;", "Input mapper Controls row label.", "guest_control_menu_label"),
+            ("fn_00103698", "if (guest_control_menu_click(cpu)) return;", "Input mapper Controls row click.", "guest_control_menu_click"),
+            ("fn_0010359c", "if (guest_control_menu_action(cpu)) return;", "Input mapper Controls row action guard.", "guest_control_menu_action"),
+            ("fn_00093fd0", "guest_force_control_mode(cpu);", "Force accelerometer control scheme.", "guest_force_control_mode"),
+            ("fn_001287c8", "if (guest_video_menu_label(cpu)) return;", "Display settings entry in the Video menu.", "guest_video_menu_label"),
+        ],
     },
     "3.3.7": {
         "cmatrix": {
@@ -54,6 +61,13 @@ VERSIONS = {
         "nitro": "fn_0015704c",
         "rotation": "fn_000bde00",
         "exit": "fn_00082b08",
+        "hooks": [
+            ("fn_000ef450", "if (guest_control_menu_label(cpu)) return;", "Input mapper Controls row label.", "guest_control_menu_label"),
+            ("fn_000eeebc", "if (guest_control_menu_click(cpu)) return;", "Input mapper Controls row click.", "guest_control_menu_click"),
+            ("fn_000eed80", "if (guest_control_menu_action(cpu)) return;", "Input mapper Controls row action guard.", "guest_control_menu_action"),
+            ("fn_0007f988", "guest_force_control_mode(cpu);", "Force accelerometer control scheme.", "guest_force_control_mode"),
+            ("fn_00115268", "if (guest_video_menu_label(cpu)) return;", "Display settings entry in the Video menu.", "guest_video_menu_label"),
+        ],
     },
     "3.4.1": {
         "cmatrix": {
@@ -72,6 +86,13 @@ VERSIONS = {
         "nitro": "fn_0015688c",
         "rotation": "fn_0009a118",
         "exit": "fn_00063bf4",
+        "hooks": [
+            ("fn_000eecc8", "if (guest_control_menu_label(cpu)) return;", "Input mapper Controls row label.", "guest_control_menu_label"),
+            ("fn_000ee734", "if (guest_control_menu_click(cpu)) return;", "Input mapper Controls row click.", "guest_control_menu_click"),
+            ("fn_000ee5fc", "if (guest_control_menu_action(cpu)) return;", "Input mapper Controls row action guard.", "guest_control_menu_action"),
+            ("fn_00060a50", "guest_force_control_mode(cpu);", "Force accelerometer control scheme.", "guest_force_control_mode"),
+            ("fn_00114428", "if (guest_video_menu_label(cpu)) return;", "Display settings entry in the Video menu.", "guest_video_menu_label"),
+        ],
     },
 }
 
@@ -84,22 +105,27 @@ def prologue(fn):
     )
 
 
-def patch_cmatrix(src, fn, op):
+def patch_simple(src, fn, call, why, sentinel):
     """None = function not in this file, False = already patched, True = changed."""
     marker = f"void {fn}(CPU *cpu)"
     start = src.find(marker)
     if start < 0:
         return src, None
-    if "guest_cmatrix" in src[start:start + 500]:
+    if sentinel in src[start:start + 500]:
         return src, False
     old = prologue(fn)
     if old not in src:
-        raise SystemExit(f"WARNING: {fn} prologue not found in this file")
-    why = ("CMatrix::GetQuaternion robust extraction" if op is None
-           else "CMatrix multiply scalar replacement")
+        raise SystemExit(f"WARNING: {fn} prologue not found")
+    return src.replace(old, old + f"    /* {why} */\n    {call}\n", 1), True
+
+
+def patch_cmatrix(src, fn, op):
+    """None = function not in this file, False = already patched, True = changed."""
+    why = ("CMatrix::GetQuaternion robust extraction." if op is None
+           else "CMatrix multiply scalar replacement.")
     call = ("guest_cmatrix_get_quaternion(cpu); return;" if op is None
             else f"guest_cmatrix_mul(cpu, {op}); return;")
-    return src.replace(old, old + f"    /* {why}. */\n    {call}\n", 1), True
+    return patch_simple(src, fn, call, why, "guest_cmatrix")
 
 
 def patch_camera(src, spec):
@@ -144,70 +170,37 @@ def patch_camera(src, spec):
 
 
 def patch_nitro(src, fn):
-    """Feed the player car's nitro bit when the host nitro button is down.
-    None = function not in this file, False = already patched, True = changed."""
-    marker = f"void {fn}(CPU *cpu)"
-    start = src.find(marker)
-    if start < 0:
-        return src, None
-    if "platform_nitro_held_for_car" in src[start:start + 500]:
-        return src, False
-    old = prologue(fn)
-    if old not in src:
-        raise SystemExit(f"WARNING: {fn} prologue not found")
-    new = old + (
-        "    /* Host nitro tap: feed the player car's nitro input bit so a\n"
-        "     * tap shorter than one 25 Hz physics tick is not lost. */\n"
-        "    if (platform_nitro_held_for_car(cpu->r[0])) cpu->r[1] |= 0x20u;\n"
+    return patch_simple(
+        src, fn,
+        "if (platform_nitro_held_for_car(cpu->r[0])) cpu->r[1] |= 0x20u;",
+        "Host nitro tap: feed the player car's nitro input bit.",
+        "platform_nitro_held_for_car",
     )
-    return src.replace(old, new, 1), True
 
 
 def patch_rotation(src, fn):
-    """Disable the phone-rotation steering assist in the forced buttons mode.
-    None = function not in this file, False = already patched, True = changed."""
-    marker = f"void {fn}(CPU *cpu)"
-    start = src.find(marker)
-    if start < 0:
-        return src, None
-    if "platform_buttons_mode" in src[start:start + 500]:
-        return src, False
-    old = prologue(fn)
-    if old not in src:
-        raise SystemExit(f"WARNING: {fn} prologue not found")
-    new = old + (
-        "    /* The port forces the on-screen buttons layout; do not let the\n"
-        "     * phone-rotation assist add a steering offset to that mode. */\n"
-        "    if (platform_buttons_mode()) return;\n"
+    return patch_simple(
+        src, fn,
+        "if (platform_buttons_mode()) return;",
+        "No phone-rotation steering in forced buttons mode.",
+        "platform_buttons_mode",
     )
-    return src.replace(old, new, 1), True
 
 
 def patch_exit(src, fn):
-    """Make Game::Exit close the host process instead of calling Java.
-    None = function not in this file, False = already patched, True = changed."""
-    marker = f"void {fn}(CPU *cpu)"
-    start = src.find(marker)
-    if start < 0:
-        return src, None
-    if "platform_request_exit" in src[start:start + 500]:
-        return src, False
-    old = prologue(fn)
-    if old not in src:
-        raise SystemExit(f"WARNING: {fn} prologue not found")
-    new = old + (
-        "    /* Game::Exit normally calls the Android activity's finish(); the\n"
-        "     * host owns the process, so make the in-game Exit item quit. */\n"
-        "    platform_request_exit();\n"
-        "    return;\n"
+    return patch_simple(
+        src, fn,
+        "platform_request_exit(); return;",
+        "Host exit for the in-game Exit item.",
+        "platform_request_exit",
     )
-    return src.replace(old, new, 1), True
 
 
 def patch_files(paths, version, strict=True):
     spec = VERSIONS[version]
     missing = set(spec["cmatrix"])
     camera_found = nitro_found = rotation_found = exit_found = False
+    hooks_found = {fn: False for fn, _, _, _ in spec["hooks"]}
     changed = 0
     for path in paths:
         src = open(path, encoding="utf-8").read()
@@ -241,6 +234,12 @@ def patch_files(paths, version, strict=True):
             exit_found = True
             if did:
                 file_changed += 1
+        for fn, call, why, sentinel in spec["hooks"]:
+            src, did = patch_simple(src, fn, call, why, sentinel)
+            if did is not None:
+                hooks_found[fn] = True
+                if did:
+                    file_changed += 1
         if file_changed:
             open(path, "w", encoding="utf-8").write(src)
             changed += file_changed
@@ -264,6 +263,10 @@ def patch_files(paths, version, strict=True):
     if not exit_found:
         print(f"WARNING: Game::Exit ({spec['exit']}) not found", file=sys.stderr)
         return 1
+    for fn, ok in hooks_found.items():
+        if not ok:
+            print(f"WARNING: runtime hook ({fn}) not found", file=sys.stderr)
+            return 1
     print(f"patched {changed} runtime function(s) in {len(paths)} file(s)")
     return 0
 

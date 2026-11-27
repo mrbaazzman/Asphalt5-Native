@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.4.0 - 2026-11-27
+
+- Replaced the builder-based setup (MinGW toolchain, PyInstaller
+  `armrecomp.exe`, and XOR-obfuscated `builder.dat`) with a clean,
+  self-contained installer that ships pre-compiled stripped host engines
+  (`Asphalt5_324.exe`, `Asphalt5_337.exe`, `Asphalt5_341.exe`) with no APK,
+  `.so`, game data, compiler, or Python runtime bundled.
+- Reduced VirusTotal AV false positives and cut install time to ~1 second:
+  - Removed XOR resource encryption and PyInstaller `--onefile`.
+  - Stored engine binaries uncompressed (`NoCompression`) to avoid high-entropy
+    packed-file heuristics (`6.31` vs `7.998`).
+  - Replaced `WScript.Shell` COM reflection with native `IShellLinkW`.
+  - Added application icon, `VERSIONINFO`, and Windows manifest to both
+    `Asphalt5Setup.exe` and the engine executables.
+  - Changed guest memory commit in `src/core/guest.c` from
+    `PAGE_EXECUTE_READWRITE` to `PAGE_READWRITE`.
+- Installer UI improvements:
+  - Live APK version detection (`3.2.4`, `3.3.7`, `3.4.1`) on selection or
+    drag-and-drop.
+  - Removed the post-install "Open gamefiles?" prompt; 3.2.4 shows a clean
+    copy-data notice, while 3.3.7 and 3.4.1 let you click Play directly.
+  - Fixed clipped hint text in the Finish panel.
+- Added all 13 runtime hooks to `tools/apply_runtime_patches.py`.
+
 ## 2.3.3 - 2026-11-08
 
 - Fixed installs failing at the final link, which left the install folder

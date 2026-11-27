@@ -62,13 +62,15 @@ produces 89 files. The patch step is mandatory: it installs the scalar
 
 ## Installer
 
-The installer compiles the game locally from the user's APK and a bundled
-MinGW toolchain. To build it:
+The installer bundles pre-compiled stripped host engines (without `.so` or
+game data) so end users need no compiler, Python runtime, or build tools. To
+build it:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\make_dist.ps1
 ```
 
-The result is `dist\Asphalt5Setup.exe`. The installer source is in
-`installer/Asphalt5Setup.cs`; it expects `build/builder.zip` from
-`tools/make_builder.ps1`.
+`tools\build_engines.ps1` compiles `Asphalt5_324.exe` from `generated/` (and
+`Asphalt5_337.exe` / `Asphalt5_341.exe` when those APKs are available) into
+`build\engines.zip`. `tools\build_installer.ps1` packages `dist\Asphalt5Setup.exe`
+from `installer\Asphalt5Setup.cs`.

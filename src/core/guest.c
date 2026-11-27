@@ -33,8 +33,9 @@ int guest_mem_init(void)
         fprintf(stderr, "[guest] cannot reserve 4 GiB: %lu\n", (unsigned long)GetLastError());
         return -1;
     }
-    /* ELF image, BSS, stacks, early heap, asset staging, synthetic objects. */
-    if (guest_commit(0x00000000, 0x01000000, PAGE_EXECUTE_READWRITE) != 0) return -1;
+    /* ELF image, BSS, stacks, early heap, asset staging, synthetic objects.
+     * Translated code runs in native .text, so guest RAM needs no execute bit. */
+    if (guest_commit(0x00000000, 0x01000000, PAGE_READWRITE) != 0) return -1;
     if (guest_commit(0x10000000, 0x01000000, PAGE_READWRITE) != 0) return -1;
     if (guest_commit(0x40000000, 0x01000000, PAGE_READWRITE) != 0) return -1;
     if (guest_commit(0x70000000, 0x00010000, PAGE_READWRITE) != 0) return -1;

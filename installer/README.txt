@@ -6,20 +6,22 @@ Requirements
 - Windows 10 or 11 x64
 - Your own Asphalt 5 APK (3.2.4 Sony Ericsson, 3.3.7 Galaxy Tab or
   3.4.1 Android Market/Motorola)
-- For 3.2.4: the matching GloftA5HD game data folder
-- For 3.3.7 / 3.4.1: internet access for the official data pack
+- For 3.2.4: your own matching GloftA5HD game data folder (copy manually into
+  <install>\gamefiles\GloftA5HD after install)
+- For 3.3.7 / 3.4.1: internet access for the official data pack (or copy your
+  own data manually into <install>\gamefiles\GloftA5HD337 / GloftA5HD341)
 
 Install
 -------
 1. Run Asphalt5Setup.exe.
-2. Select the APK and an install folder.
-3. Click Install. The setup translates and compiles the game locally.
-4. Start the game from the shortcut or <install>\Asphalt5.exe.
+2. Select (or drag-and-drop) your APK and choose an install folder.
+3. Click Install.
+4. For 3.2.4, copy your GloftA5HD folder into <install>\gamefiles\GloftA5HD.
+5. Start the game from the shortcut or <install>\Asphalt5.exe.
 
-The setup detects the APK version, picks the matching library and patch set,
-and contains the recompiler, MinGW toolchain and host sources. It does not
-contain game code or assets; the executable is produced from your own APK.
-Temporary files are removed after the build.
+The setup detects the APK version, extracts libasphalt5.so (and 3.3.7/3.4.1
+installer UI assets) from your own APK, and writes <install>\Asphalt5.exe.
+No APK, original .so, or game data is shipped in the setup.
 
 3.3.7 / 3.4.1 first launch
 --------------------------
@@ -43,24 +45,12 @@ the cached files are:
 
 Deleting the relevant file forces a fresh server download.
 
-There is no separate installer executable and no generic download dialog:
-the logo, panel, buttons, progress bar and font are the ported GameInstaller
-UI from the APK.
-
 Notes
 -----
-- The installer windows are 1024x600 (3.3.7) and 1024x576 (3.4.1). The
-  3.3.7 game runs at 1920x1080 by default when the desktop supports it
-  (otherwise 1536x900), with the original 1024x600 logical UI. The 3.4.1
-  game uses its original 854x480 logical UI and also defaults to 1920x1080.
 - Set RECOMP_RES=1920x1080 to force 1080p, or another size such as
   RECOMP_RES=1536x900.
 - Esc pauses and resumes; the pause menu Exit item quits.
-- The 3.4.1 intro movie plays on first launch (its 854x480 variant is used).
-  Click or press Esc to skip it.
-- Only Asphalt5.exe and gamefiles/ remain after installation. The first-run
-  installer unpacks its embedded UI to %LOCALAPPDATA%\Asphalt5\ui337 or
-  ui341 and deletes it when the installer closes.
+- Only Asphalt5.exe and gamefiles/ remain after installation.
 - Logs: %LOCALAPPDATA%\Asphalt5\asphalt5.log, installer.log and install.log.
 - Remove the game by deleting the install folder and shortcuts.
 
@@ -68,41 +58,23 @@ Controls
 --------
 Menus       mouse click
 Input map   F1, or OPTIONS > CONTROLS > CONFIGURE INPUT
+Display     F2, or OPTIONS > VIDEO > DISPLAY SETTINGS
 Race        left/right mouse halves steer; pedals brake; N fires nitro
 Keyboard    arrows or A/D steer, W/S accelerate/brake, Space nitro,
             C camera, Esc pause/resume, Ctrl+Q quit
 Movies      click or Esc to skip
 
-Input mapper
-------------
-The mapper is a host-drawn overlay; the stock Controls page is not changed.
-Click any row or cell and press a key, XInput button/axis, or DirectInput
-button/axis. Use the keyboard or controller column to choose the device.
-Delete clears a binding, Reset Defaults restores the stock layout, and
-Esc/F1 closes. Changes save to %LOCALAPPDATA%\Asphalt5\input.ini and are
-loaded on the next launch.
-
-The phone's on-screen touch buttons are hidden during races. Mouse zones,
-keyboard and gamepad controls above still work. Set RECOMP_SHOW_TOUCH=1 to
-show the original touch overlay.
-
 Silent mode
 -----------
   Asphalt5Setup.exe --silent --apk <file.apk> --dir <dir>
-                    [--shortcut] [--force] [--keep-build] [--log <file>]
-
-The setup does not download or copy game data. For 3.3.7 and 3.4.1 the game
-downloads its official pack from the live server on first launch; for 3.2.4
-copy your own GloftA5HD folder into <install>\gamefiles\GloftA5HD.
+                    [--shortcut] [--force] [--log <file>]
 
 Troubleshooting
 ---------------
 - Unsupported APK: this build targets the 3.2.4 SE, 3.3.7 Galaxy Tab and
   3.4.1 Android Market libraries. Other builds will crash.
-- Build failed: open install.log.
+- Install failed: open install.log.
 - Game exits immediately: check gamefiles\GloftA5HD (3.2.4),
   gamefiles\GloftA5HD337 (3.3.7) or gamefiles\GloftA5HD341 (3.4.1), then
   asphalt5.log.
 - No videos: the MP4 files must exist in the game data folder.
-- Installer network error: see installer.log. The URL and SHA-256 are
-  embedded in Asphalt5.exe with the installer UI.

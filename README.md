@@ -46,26 +46,24 @@ It does not contain the APK, the original `.so`, or the game data packs.
 
 ## Build
 
-The supported end-user path is the setup, which bundles the translator and
-toolchain and builds either APK locally:
+The supported end-user path is the setup (`Asphalt5Setup.exe`), which detects
+3.2.4, 3.3.7 or 3.4.1 from your APK and installs `Asphalt5.exe` directly:
 
 ```powershell
 python -m pip install -r requirements.txt
-powershell -ExecutionPolicy Bypass -File tools\make_builder.ps1
-powershell -ExecutionPolicy Bypass -File tools\build_installer.ps1
-.\build\Asphalt5Setup.exe
+powershell -ExecutionPolicy Bypass -File tools\make_dist.ps1
+.\dist\Asphalt5Setup.exe
 ```
 
-The setup detects 3.2.4, 3.3.7 or 3.4.1 from the APK, selects the right
-library, patch set, UI size and data folder, and builds `Asphalt5.exe`.  It
-does not download or copy game data: the 3.3.7/3.4.1 games fetch their
-official packs on first launch, and 3.2.4 users drop their own `GloftA5HD`
-folder next to the game.  For 3.3.7 and 3.4.1 the setup embeds the six
-installer UI files (logo, font, panel and music) and the data manifest inside
-`Asphalt5.exe`.  The install folder therefore contains only `Asphalt5.exe`
-and `gamefiles/`; no APK resources or manifest are left loose.  The first-run
-installer extracts the embedded UI to `%LOCALAPPDATA%` temporarily, then
-removes it.
+The setup detects 3.2.4, 3.3.7 or 3.4.1 from the APK, selects the matching
+pre-built host engine, and embeds your APK's `libasphalt5.so` (plus the six
+installer UI files and manifest for 3.3.7/3.4.1) into `Asphalt5.exe`.  It
+does not ship or copy game data: 3.3.7/3.4.1 can fetch their official
+packs on first launch (or use manually copied data), and 3.2.4 users copy
+their own `GloftA5HD` folder into `gamefiles\GloftA5HD`.  The install folder
+contains only `Asphalt5.exe` and `gamefiles/`; no APK resources or manifest
+are left loose.  The first-run installer extracts the embedded UI to
+`%LOCALAPPDATA%` temporarily, then removes it.
 
 For a source build of 3.2.4:
 
