@@ -3,8 +3,8 @@
 1 ICON "asphalt5.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     2,4,0,0
-PRODUCTVERSION  2,4,0,0
+FILEVERSION     2,4,1,0
+PRODUCTVERSION  2,4,1,0
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 FILEFLAGS       0x0L
 FILEOS          VOS__WINDOWS32
@@ -17,11 +17,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "Asphalt 5 Native"
             VALUE "FileDescription",  "Asphalt 5 HD Native Runtime"
-            VALUE "FileVersion",      "2.4.0.0"
+            VALUE "FileVersion",      "2.4.1.0"
             VALUE "InternalName",     "Asphalt5"
             VALUE "OriginalFilename", "Asphalt5.exe"
             VALUE "ProductName",      "Asphalt 5 Native"
-            VALUE "ProductVersion",   "2.4.0.0"
+            VALUE "ProductVersion",   "2.4.1.0"
         END
     END
     BLOCK "VarFileInfo"

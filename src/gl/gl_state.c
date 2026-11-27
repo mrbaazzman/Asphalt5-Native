@@ -51,6 +51,7 @@ void gl_Enable(CPU *c)
 {
     if (g_verbose && g_state_log < 20)
         fprintf(stderr, "[gl] Enable %x\n", (unsigned)A(0));
+    if ((GLenum)A(0) == GL_MATRIX_PALETTE_OES) { g_matrix_palette_enabled = 1; return; }
     if ((GLenum)A(0) == GL_CULL_FACE && getenv("RECOMP_NO_CULL")) return;
     glEnable((GLenum)A(0));
 }
@@ -60,6 +61,7 @@ void gl_Disable(CPU *c)
 {
     if (g_verbose && g_state_log < 20)
         fprintf(stderr, "[gl] Disable %x\n", (unsigned)A(0));
+    if ((GLenum)A(0) == GL_MATRIX_PALETTE_OES) { g_matrix_palette_enabled = 0; return; }
     glDisable((GLenum)A(0));
 }
 

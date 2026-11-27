@@ -42,6 +42,11 @@ void gl_DrawElements(CPU *c)
     if (solid) solid_begin(&sv);
     if (draw_id_env()) draw_id_color(id);
     bind_client_tex_units();
+    if (g_matrix_palette_enabled && g_matrix_index_enabled && g_weight_enabled &&
+        gl_skin_draw_elements((GLenum)A(0), (GLsizei)A(1), (GLenum)A(2), ind ? ind : AP(3))) {
+        if (solid) solid_end(&sv);
+        return;
+    }
     glDrawElements((GLenum)A(0), (GLsizei)A(1), (GLenum)A(2), ind ? ind : AP(3));
     if (solid) solid_end(&sv);
 }
@@ -55,16 +60,31 @@ int idx_type_size(GLenum t)
 
 int guest_range_ok(uint32_t addr, uint64_t len)
 {
+    static struct { uint64_t lo, hi; } cache[64];
+    static int cache_next = 0;
     uint64_t end = (uint64_t)addr + len;
     if (end > 0x100000000ull) return 0;
     uint64_t p = addr;
     while (p < end) {
+        int hit = 0;
+        for (int i = 0; i < 64; i++) {
+            if (p >= cache[i].lo && p < cache[i].hi) {
+                p = cache[i].hi;
+                hit = 1;
+                break;
+            }
+        }
+        if (hit) continue;
         MEMORY_BASIC_INFORMATION mbi;
         if (!VirtualQuery(g_mem + p, &mbi, sizeof(mbi))) return 0;
         if (mbi.State != MEM_COMMIT) return 0;
         if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return 0;
-        uint64_t next = (uint64_t)(uintptr_t)mbi.BaseAddress - (uintptr_t)g_mem + mbi.RegionSize;
+        uint64_t lo = (uint64_t)((uintptr_t)mbi.BaseAddress - (uintptr_t)g_mem);
+        uint64_t next = lo + mbi.RegionSize;
         if (next <= p) return 0;
+        cache[cache_next].lo = lo;
+        cache[cache_next].hi = next;
+        cache_next = (cache_next + 1) & 63;
         p = next;
     }
     return 1;

@@ -597,6 +597,24 @@ static int run_boot(const char *so)
     jni_init();
     if (guest_load_elf_auto(so) != 0) return 2;
 
+    /* CarSceneObject::UpdateLOD checks distances {0, 500, 800, 1500, 10000}
+     * with +/-150 hysteresis; LOD 3 drops wheel sub-meshes (6..10). Raising
+     * the LOD 2->3 threshold to 9500 keeps opponent wheels visible across
+     * the whole draw range while preserving LOD 4 culling at 10000. */
+    {
+        static const uint32_t lod_addrs[] = { 0x00210680u, 0x001c63e8u, 0x001bdf58u };
+        for (size_t i = 0; i < sizeof(lod_addrs) / sizeof(lod_addrs[0]); i++) {
+            uint32_t a = lod_addrs[i];
+            if (guest_range_ok(a, 20) &&
+                rd32(a + 0) == 0u && rd32(a + 4) == 500u &&
+                rd32(a + 8) == 800u && rd32(a + 12) == 1500u && rd32(a + 16) == 10000u) {
+                wr32(a + 12, 9500u);
+                fprintf(stderr, "[patch] raised car LOD 2->3 distance 1500 -> 9500 @%08x\n", a + 12);
+                break;
+            }
+        }
+    }
+
     CPU cpu; memset(&cpu, 0, sizeof(cpu));
     cpu.r[13] = 0xBF800000; cpu.cpsr = 0x10; cpu.tid = 1;
 

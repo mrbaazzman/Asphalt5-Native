@@ -130,7 +130,36 @@ extern int g_state_log;
 extern uint64_t g_oes_current, g_oes_index, g_oes_weight, g_skinned_draws;
 extern uint64_t g_draw_tex, g_draw_notex, g_draw_nrm, g_draw_col, g_draw_tc, g_draw_sampled;
 extern uint32_t g_weight_ptr, g_matrix_index_ptr;
+#define OES_MAX_PALETTE_MATRICES 32
+#ifndef GL_MATRIX_PALETTE_OES
+#define GL_MATRIX_PALETTE_OES 0x8840u
+#endif
+#ifndef GL_MATRIX_INDEX_ARRAY_OES
+#define GL_MATRIX_INDEX_ARRAY_OES 0x8844u
+#endif
+#ifndef GL_WEIGHT_ARRAY_OES
+#define GL_WEIGHT_ARRAY_OES 0x86ADu
+#endif
+
+extern GLuint g_cur_palette_mtx;
+extern GLfloat g_palette_mtx[OES_MAX_PALETTE_MATRICES][16];
+extern GLenum g_matrix_mode;
+extern GLenum g_gl_matrix_mode;
+extern int g_matrix_palette_enabled;
+extern int g_matrix_index_enabled;
+extern int g_weight_enabled;
+extern int g_np_enabled;
+extern GLint g_mi_size;
+extern GLenum g_mi_type;
+extern GLsizei g_mi_stride;
+extern GLint g_wt_size;
+extern GLenum g_wt_type;
+extern GLsizei g_wt_stride;
+extern GLsizei g_nrm_stride;
+extern uint32_t g_nrm_ptr;
 extern int g_oes_log;
+
+int gl_skin_draw_elements(GLenum mode, GLsizei count, GLenum type, const void *indices);
 extern int g_swap_count;
 
 extern GLint g_cur_tex_binding;

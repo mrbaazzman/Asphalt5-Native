@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.4.1 - 2026-11-27
+
+- Fixed corrupted/twisted motorcycle rider 3D models by implementing OpenGL ES
+  1.1 `GL_OES_matrix_palette` (`MatrixMode(0x8840)`, `CurrentPaletteMatrixOES`,
+  `MatrixIndexPointerOES`, `WeightPointerOES`, and CPU vertex/normal skinning)
+  in `src/gl/` so skinned rider meshes render in eye space instead of clobbering
+  `GL_MODELVIEW`.
+- Cached verified committed memory spans in `guest_range_ok` (`src/gl/gl_draw.c`)
+  to eliminate hundreds of per-frame `VirtualQuery` calls during skinning.
+- Fixed missing wheels on distant opponent vehicles (`LOD 3`) by raising the
+  `CarSceneObject::UpdateLOD` LOD `2 -> 3` distance threshold from `1500` to
+  `9500` across `3.2.4`, `3.3.7`, and `3.4.1`, keeping wheel sub-meshes
+  (`6..10`) rendered throughout the visible draw distance.
+
 ## 2.4.0 - 2026-11-27
 
 - Replaced the builder-based setup (MinGW toolchain, PyInstaller
